@@ -9,6 +9,7 @@ import {
   disposeVoxelMesh,
 } from './voxelGeometry';
 import { OBJECT_TYPES, createObjectGroup, disposeObjectGroup } from './objectGeometry';
+import { syncBirdFlock, updateBirdFlock } from './birdFlock';
 import './App.css';
 
 const VOXEL_TYPES = [
@@ -45,8 +46,8 @@ function App() {
       0.1,
       2000
     );
-    camera.position.set(34, 28, 46);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(80, 125, 120);
+    camera.lookAt(0, 45, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -62,7 +63,7 @@ function App() {
     controls.minDistance = 18;
     controls.maxDistance = 360;
     controls.maxPolarAngle = Math.PI * 0.48;
-    controls.target.set(0, 2, 0);
+    controls.target.set(0, 35, 0);
     controls.update();
 
     const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x4b6444, 2.8);
@@ -110,6 +111,13 @@ function App() {
     let objectGroup = createObjectGroup([...objectMap.values()]);
     scene.add(objectGroup);
 
+    const birdGroup = new THREE.Group();
+    birdGroup.name = 'bird-flock';
+    const birds = [];
+    scene.add(birdGroup);
+
+    const getBirdNests = () => [...objectMap.values()].filter((object) => object.type === 'birdNest');
+
     const rebuildVoxelMesh = () => {
       const oldVoxelMesh = voxelMesh;
       voxelMesh = createVoxelMesh([...voxelMap.values()]);
@@ -124,6 +132,7 @@ function App() {
       scene.add(objectGroup);
       scene.remove(oldObjectGroup);
       disposeObjectGroup(oldObjectGroup);
+      syncBirdFlock(birds, birdGroup, getBirdNests());
     };
 
     const removeUnsupportedObjects = () => {
@@ -139,6 +148,20 @@ function App() {
       });
 
       return removed;
+    };
+
+    const getSurfaceHeight = (worldX, worldZ) => {
+      const x = Math.floor(worldX / VOXEL_SIZE);
+      const z = Math.floor(worldZ / VOXEL_SIZE);
+      let highestY = -1;
+
+      voxelMap.forEach((voxel) => {
+        if (voxel.x === x && voxel.z === z && voxel.y > highestY) {
+          highestY = voxel.y;
+        }
+      });
+
+      return (highestY + 1) * VOXEL_SIZE;
     };
 
     const raycaster = new THREE.Raycaster();
@@ -200,9 +223,12 @@ function App() {
       const targetKey = voxelKey(targetX, targetY, targetZ);
 
       if (event.shiftKey) {
-        if (selectedTool.kind === 'object' && normalIsUp) {
-          objectMap.delete(targetKey);
-          rebuildObjectGroup();
+        if (selectedTool.kind === 'object') {
+          if (normalIsUp) {
+            objectMap.delete(targetKey);
+            rebuildObjectGroup();
+          }
+
           hoveredFace = null;
           faceHighlight.visible = false;
           return;
@@ -273,8 +299,11 @@ function App() {
     let animationFrameId;
     let hoveredFace = null;
     const pointerStart = new THREE.Vector2();
+    const clock = new THREE.Clock();
 
     const animate = () => {
+      const deltaSeconds = clock.getDelta();
+
       grid.position.x = Math.round(camera.position.x / gridCellSize) * gridCellSize;
       grid.position.z = Math.round(camera.position.z / gridCellSize) * gridCellSize;
       ground.position.x = grid.position.x;
@@ -308,6 +337,7 @@ function App() {
         faceHighlight.visible = false;
       }
 
+      updateBirdFlock(birds, getBirdNests(), getSurfaceHeight, deltaSeconds);
       controls.update();
       renderer.render(scene, camera);
       animationFrameId = window.requestAnimationFrame(animate);
