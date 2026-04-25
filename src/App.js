@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createVoxelMesh, createVoxelTerrain, disposeVoxelMesh } from './voxelGeometry';
 import './App.css';
 
 function App() {
@@ -65,24 +66,18 @@ function App() {
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.03;
     ground.receiveShadow = true;
     scene.add(ground);
 
     const grid = new THREE.GridHelper(gridSize, gridDivisions, 0x000000, 0x000000);
+    grid.position.y = 0.02;
     grid.material.opacity = 0.35;
     grid.material.transparent = true;
     scene.add(grid);
 
-    const markerGeometry = new THREE.BoxGeometry(8, 8, 8);
-    const markerMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd78b31,
-      roughness: 0.65,
-    });
-    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-    marker.position.set(0, 4, 0);
-    marker.castShadow = true;
-    marker.receiveShadow = true;
-    scene.add(marker);
+    const voxelMesh = createVoxelMesh(createVoxelTerrain(9));
+    scene.add(voxelMesh);
 
     const handleResize = () => {
       const width = mount.clientWidth;
@@ -102,7 +97,6 @@ function App() {
       ground.position.x = grid.position.x;
       ground.position.z = grid.position.z;
 
-      marker.rotation.y += 0.008;
       controls.update();
       renderer.render(scene, camera);
       animationFrameId = window.requestAnimationFrame(animate);
@@ -117,8 +111,7 @@ function App() {
       renderer.dispose();
       groundGeometry.dispose();
       groundMaterial.dispose();
-      markerGeometry.dispose();
-      markerMaterial.dispose();
+      disposeVoxelMesh(voxelMesh);
     };
   }, []);
 
