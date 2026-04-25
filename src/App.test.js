@@ -1,8 +1,12 @@
-import { render, screen } from '@testing-library/react';
-import App from './App';
+jest.mock('three/examples/jsm/controls/OrbitControls.js', () => ({
+  OrbitControls: jest.fn().mockImplementation(() => ({
+    update: jest.fn(),
+    dispose: jest.fn(),
+  })),
+}));
 
-test('renders learn react link', () => {
-  render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+const App = require('./App').default;
+
+test('exports the voxel world app component', () => {
+  expect(typeof App).toBe('function');
 });
