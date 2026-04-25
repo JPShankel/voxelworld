@@ -8,6 +8,7 @@ import {
   createVoxelTerrain,
   disposeVoxelMesh,
 } from './voxelGeometry';
+import { OBJECT_TYPES, createObjectGroup, disposeObjectGroup } from './objectGeometry';
 import './App.css';
 
 const VOXEL_TYPES = [
@@ -17,15 +18,16 @@ const VOXEL_TYPES = [
 ];
 
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
+const toolKey = (kind, id) => `${kind}:${id}`;
 
 function App() {
   const mountRef = useRef(null);
-  const [selectedVoxelType, setSelectedVoxelType] = useState('grass');
-  const selectedVoxelTypeRef = useRef(selectedVoxelType);
+  const [selectedTool, setSelectedTool] = useState({ kind: 'voxel', id: 'grass' });
+  const selectedToolRef = useRef(selectedTool);
 
   useEffect(() => {
-    selectedVoxelTypeRef.current = selectedVoxelType;
-  }, [selectedVoxelType]);
+    selectedToolRef.current = selectedTool;
+  }, [selectedTool]);
 
   useEffect(() => {
     const gridSize = 1200;
@@ -104,12 +106,39 @@ function App() {
     let voxelMesh = createVoxelMesh([...voxelMap.values()]);
     scene.add(voxelMesh);
 
+    const objectMap = new Map();
+    let objectGroup = createObjectGroup([...objectMap.values()]);
+    scene.add(objectGroup);
+
     const rebuildVoxelMesh = () => {
       const oldVoxelMesh = voxelMesh;
       voxelMesh = createVoxelMesh([...voxelMap.values()]);
       scene.add(voxelMesh);
       scene.remove(oldVoxelMesh);
       disposeVoxelMesh(oldVoxelMesh);
+    };
+
+    const rebuildObjectGroup = () => {
+      const oldObjectGroup = objectGroup;
+      objectGroup = createObjectGroup([...objectMap.values()]);
+      scene.add(objectGroup);
+      scene.remove(oldObjectGroup);
+      disposeObjectGroup(oldObjectGroup);
+    };
+
+    const removeUnsupportedObjects = () => {
+      let removed = false;
+
+      objectMap.forEach((object, key) => {
+        const supportKey = voxelKey(object.x, object.y - 1, object.z);
+
+        if (!voxelMap.has(supportKey) || voxelMap.has(key)) {
+          objectMap.delete(key);
+          removed = true;
+        }
+      });
+
+      return removed;
     };
 
     const raycaster = new THREE.Raycaster();
@@ -163,28 +192,66 @@ function App() {
       }
 
       const { x, y, z, normal } = hoveredFace;
+      const selectedTool = selectedToolRef.current;
+      const normalIsUp = normal[0] === 0 && normal[1] === 1 && normal[2] === 0;
+      const targetX = x + normal[0];
+      const targetY = y + normal[1];
+      const targetZ = z + normal[2];
+      const targetKey = voxelKey(targetX, targetY, targetZ);
 
       if (event.shiftKey) {
-        voxelMap.delete(voxelKey(x, y, z));
-      } else {
-        const nextX = x + normal[0];
-        const nextY = y + normal[1];
-        const nextZ = z + normal[2];
-        const nextKey = voxelKey(nextX, nextY, nextZ);
-
-        if (!voxelMap.has(nextKey)) {
-          voxelMap.set(nextKey, {
-            x: nextX,
-            y: nextY,
-            z: nextZ,
-            type: selectedVoxelTypeRef.current,
-          });
+        if (selectedTool.kind === 'object' && normalIsUp) {
+          objectMap.delete(targetKey);
+          rebuildObjectGroup();
+          hoveredFace = null;
+          faceHighlight.visible = false;
+          return;
         }
+
+        voxelMap.delete(voxelKey(x, y, z));
+
+        if (removeUnsupportedObjects()) {
+          rebuildObjectGroup();
+        }
+
+        rebuildVoxelMesh();
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
+      if (selectedTool.kind === 'object') {
+        if (normalIsUp && !voxelMap.has(targetKey)) {
+          objectMap.set(targetKey, {
+            key: targetKey,
+            x: targetX,
+            y: targetY,
+            z: targetZ,
+            type: selectedTool.id,
+          });
+          rebuildObjectGroup();
+        }
+
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
+      if (!voxelMap.has(targetKey)) {
+        objectMap.delete(targetKey);
+        voxelMap.set(targetKey, {
+          x: targetX,
+          y: targetY,
+          z: targetZ,
+          type: selectedTool.id,
+        });
+        removeUnsupportedObjects();
+        rebuildObjectGroup();
+        rebuildVoxelMesh();
       }
 
       hoveredFace = null;
       faceHighlight.visible = false;
-      rebuildVoxelMesh();
     };
 
     renderer.domElement.addEventListener('pointermove', handlePointerMove);
@@ -262,20 +329,21 @@ function App() {
       faceHighlightGeometry.dispose();
       faceHighlightMaterial.dispose();
       disposeVoxelMesh(voxelMesh);
+      disposeObjectGroup(objectGroup);
     };
   }, []);
 
   return (
     <>
       <main className="world" ref={mountRef} aria-label="Voxel world scene" />
-      <div className="tool-palette" aria-label="Voxel type palette">
+      <div className="tool-palette" aria-label="Tool palette">
         {VOXEL_TYPES.map((voxelType) => (
           <button
             key={voxelType.id}
-            className={voxelType.id === selectedVoxelType ? 'tool active' : 'tool'}
+            className={toolKey('voxel', voxelType.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
             type="button"
-            onClick={() => setSelectedVoxelType(voxelType.id)}
-            aria-pressed={voxelType.id === selectedVoxelType}
+            onClick={() => setSelectedTool({ kind: 'voxel', id: voxelType.id })}
+            aria-pressed={toolKey('voxel', voxelType.id) === toolKey(selectedTool.kind, selectedTool.id)}
             title={voxelType.label}
           >
             <span
@@ -283,6 +351,23 @@ function App() {
               style={{ backgroundColor: `#${VOXEL_PALETTE[voxelType.id].toString(16).padStart(6, '0')}` }}
             />
             <span>{voxelType.label}</span>
+          </button>
+        ))}
+        <span className="tool-divider" aria-hidden="true" />
+        {OBJECT_TYPES.map((objectType) => (
+          <button
+            key={objectType.id}
+            className={toolKey('object', objectType.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
+            type="button"
+            onClick={() => setSelectedTool({ kind: 'object', id: objectType.id })}
+            aria-pressed={toolKey('object', objectType.id) === toolKey(selectedTool.kind, selectedTool.id)}
+            title={objectType.label}
+          >
+            <span
+              className="swatch"
+              style={{ backgroundColor: `#${objectType.color.toString(16).padStart(6, '0')}` }}
+            />
+            <span>{objectType.label}</span>
           </button>
         ))}
       </div>
