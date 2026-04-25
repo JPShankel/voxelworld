@@ -67,7 +67,7 @@ const FACE_DEFINITIONS = [
 
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
 
-export function createVoxelTerrain(radius = 8) {
+export function createVoxelTerrain(radius = 16) {
   const voxels = [];
 
   for (let x = -radius; x <= radius; x += 1) {
@@ -105,6 +105,7 @@ export function createVoxelMesh(voxels, options = {}) {
         positions: [],
         normals: [],
         indices: [],
+        faceLookup: [],
       });
     }
 
@@ -136,6 +137,10 @@ export function createVoxelMesh(voxels, options = {}) {
         vertexOffset + 2,
         vertexOffset + 3
       );
+      buffer.faceLookup.push(
+        { x, y, z, normal: [normalX, normalY, normalZ] },
+        { x, y, z, normal: [normalX, normalY, normalZ] }
+      );
     });
   });
 
@@ -147,6 +152,7 @@ export function createVoxelMesh(voxels, options = {}) {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(buffer.positions, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(buffer.normals, 3));
     geometry.setIndex(buffer.indices);
+    geometry.userData.faceLookup = buffer.faceLookup;
     geometry.computeBoundingSphere();
 
     const material = new THREE.MeshStandardMaterial({

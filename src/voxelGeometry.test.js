@@ -21,6 +21,7 @@ test('builds exposed-face voxel geometry', () => {
 
   expect(mesh.geometry.attributes.position.count).toBe(40);
   expect(mesh.geometry.index.count).toBe(60);
+  expect(mesh.geometry.userData.faceLookup).toHaveLength(20);
   expect(VOXEL_SIZE).toBe(10);
 
   disposeVoxelMesh(voxelMesh);

@@ -1,11 +1,31 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createVoxelMesh, createVoxelTerrain, disposeVoxelMesh } from './voxelGeometry';
+import {
+  VOXEL_PALETTE,
+  VOXEL_SIZE,
+  createVoxelMesh,
+  createVoxelTerrain,
+  disposeVoxelMesh,
+} from './voxelGeometry';
 import './App.css';
+
+const VOXEL_TYPES = [
+  { id: 'grass', label: 'Grass' },
+  { id: 'dirt', label: 'Dirt' },
+  { id: 'stone', label: 'Stone' },
+];
+
+const voxelKey = (x, y, z) => `${x},${y},${z}`;
 
 function App() {
   const mountRef = useRef(null);
+  const [selectedVoxelType, setSelectedVoxelType] = useState('grass');
+  const selectedVoxelTypeRef = useRef(selectedVoxelType);
+
+  useEffect(() => {
+    selectedVoxelTypeRef.current = selectedVoxelType;
+  }, [selectedVoxelType]);
 
   useEffect(() => {
     const gridSize = 1200;
@@ -76,8 +96,101 @@ function App() {
     grid.material.transparent = true;
     scene.add(grid);
 
-    const voxelMesh = createVoxelMesh(createVoxelTerrain(9));
+    const voxelMap = new Map();
+    createVoxelTerrain(17).forEach((voxel) => {
+      voxelMap.set(voxelKey(voxel.x, voxel.y, voxel.z), voxel);
+    });
+
+    let voxelMesh = createVoxelMesh([...voxelMap.values()]);
     scene.add(voxelMesh);
+
+    const rebuildVoxelMesh = () => {
+      const oldVoxelMesh = voxelMesh;
+      voxelMesh = createVoxelMesh([...voxelMap.values()]);
+      scene.add(voxelMesh);
+      scene.remove(oldVoxelMesh);
+      disposeVoxelMesh(oldVoxelMesh);
+    };
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let pointerActive = false;
+    const faceHighlightGeometry = new THREE.PlaneGeometry(VOXEL_SIZE, VOXEL_SIZE);
+    const faceHighlightMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd84d,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    const faceHighlight = new THREE.Mesh(faceHighlightGeometry, faceHighlightMaterial);
+    faceHighlight.visible = false;
+    scene.add(faceHighlight);
+
+    const updatePointer = (event) => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    };
+
+    const handlePointerMove = (event) => {
+      pointerActive = true;
+      updatePointer(event);
+    };
+
+    const handlePointerLeave = () => {
+      pointerActive = false;
+      faceHighlight.visible = false;
+    };
+
+    const handlePointerDown = (event) => {
+      pointerStart.x = event.clientX;
+      pointerStart.y = event.clientY;
+    };
+
+    const handlePointerUp = (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const dragDistance = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
+
+      if (dragDistance > 4 || !hoveredFace) {
+        return;
+      }
+
+      const { x, y, z, normal } = hoveredFace;
+
+      if (event.shiftKey) {
+        voxelMap.delete(voxelKey(x, y, z));
+      } else {
+        const nextX = x + normal[0];
+        const nextY = y + normal[1];
+        const nextZ = z + normal[2];
+        const nextKey = voxelKey(nextX, nextY, nextZ);
+
+        if (!voxelMap.has(nextKey)) {
+          voxelMap.set(nextKey, {
+            x: nextX,
+            y: nextY,
+            z: nextZ,
+            type: selectedVoxelTypeRef.current,
+          });
+        }
+      }
+
+      hoveredFace = null;
+      faceHighlight.visible = false;
+      rebuildVoxelMesh();
+    };
+
+    renderer.domElement.addEventListener('pointermove', handlePointerMove);
+    renderer.domElement.addEventListener('pointerleave', handlePointerLeave);
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
 
     const handleResize = () => {
       const width = mount.clientWidth;
@@ -91,11 +204,42 @@ function App() {
     window.addEventListener('resize', handleResize);
 
     let animationFrameId;
+    let hoveredFace = null;
+    const pointerStart = new THREE.Vector2();
+
     const animate = () => {
       grid.position.x = Math.round(camera.position.x / gridCellSize) * gridCellSize;
       grid.position.z = Math.round(camera.position.z / gridCellSize) * gridCellSize;
       ground.position.x = grid.position.x;
       ground.position.z = grid.position.z;
+
+      let hit;
+
+      if (pointerActive) {
+        raycaster.setFromCamera(pointer, camera);
+        [hit] = raycaster.intersectObjects(voxelMesh.children, false);
+      }
+
+      if (hit) {
+        const faceData = hit.object.geometry.userData.faceLookup?.[hit.faceIndex];
+
+        if (faceData) {
+          const normal = new THREE.Vector3(...faceData.normal);
+          const center = new THREE.Vector3(
+            (faceData.x + 0.5) * VOXEL_SIZE,
+            (faceData.y + 0.5) * VOXEL_SIZE,
+            (faceData.z + 0.5) * VOXEL_SIZE
+          );
+
+          hoveredFace = faceData;
+          faceHighlight.position.copy(center).addScaledVector(normal, VOXEL_SIZE * 0.501);
+          faceHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+          faceHighlight.visible = true;
+        }
+      } else {
+        hoveredFace = null;
+        faceHighlight.visible = false;
+      }
 
       controls.update();
       renderer.render(scene, camera);
@@ -106,16 +250,44 @@ function App() {
     return () => {
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove);
+      renderer.domElement.removeEventListener('pointerleave', handlePointerLeave);
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       mount.removeChild(renderer.domElement);
       controls.dispose();
       renderer.dispose();
       groundGeometry.dispose();
       groundMaterial.dispose();
+      faceHighlightGeometry.dispose();
+      faceHighlightMaterial.dispose();
       disposeVoxelMesh(voxelMesh);
     };
   }, []);
 
-  return <main className="world" ref={mountRef} aria-label="Voxel world scene" />;
+  return (
+    <>
+      <main className="world" ref={mountRef} aria-label="Voxel world scene" />
+      <div className="tool-palette" aria-label="Voxel type palette">
+        {VOXEL_TYPES.map((voxelType) => (
+          <button
+            key={voxelType.id}
+            className={voxelType.id === selectedVoxelType ? 'tool active' : 'tool'}
+            type="button"
+            onClick={() => setSelectedVoxelType(voxelType.id)}
+            aria-pressed={voxelType.id === selectedVoxelType}
+            title={voxelType.label}
+          >
+            <span
+              className="swatch"
+              style={{ backgroundColor: `#${VOXEL_PALETTE[voxelType.id].toString(16).padStart(6, '0')}` }}
+            />
+            <span>{voxelType.label}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
 }
 
 export default App;
