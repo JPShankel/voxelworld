@@ -9,8 +9,24 @@ import {
   disposeVoxelMesh,
 } from './voxelGeometry';
 import { OBJECT_TYPES, createObjectGroup, disposeObjectGroup } from './objectGeometry';
+import {
+  FLUID_EFFECT_TYPES,
+  createFluidEffectGroup,
+  disposeFluidEffectGroup,
+} from './fluidEffectGeometry';
 import { syncBirdFlock, updateBirdFlock } from './birdFlock';
 import { syncRabbitWarren, updateRabbitWarren } from './rabbitWarren';
+import {
+  WATER_COLOR,
+  addWaterDrop,
+  applyWaterEffects,
+  createWaterMap,
+  createWaterMesh,
+  disposeWaterMesh,
+  flowWater,
+  removeWaterDrop,
+  validateWater,
+} from './waterGeometry';
 import './App.css';
 
 const VOXEL_TYPES = [
@@ -19,13 +35,21 @@ const VOXEL_TYPES = [
   { id: 'stone', label: 'Stone' },
 ];
 
+const EFFECT_TOOLS = [
+  { id: 'water', label: 'Water', color: WATER_COLOR },
+  ...FLUID_EFFECT_TYPES,
+];
+
 const DEFAULT_SCENE_COUNTS = {
   trees: 10,
   hutches: 2,
   nests: 4,
 };
 
+const WATER_FLOW_INTERVAL_SECONDS = 0.05;
+
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
+const columnKey = (x, z) => `${x},${z}`;
 const toolKey = (kind, id) => `${kind}:${id}`;
 
 function App() {
@@ -139,6 +163,14 @@ function App() {
     let voxelMesh = createVoxelMesh([...voxelMap.values()]);
     scene.add(voxelMesh);
 
+    const waterMap = createWaterMap();
+    let waterMesh = createWaterMesh([...waterMap.values()]);
+    scene.add(waterMesh);
+
+    const fluidEffectMap = new Map();
+    let fluidEffectGroup = createFluidEffectGroup([...fluidEffectMap.values()]);
+    scene.add(fluidEffectGroup);
+
     const objectMap = new Map();
     let objectGroup = createObjectGroup([...objectMap.values()]);
     scene.add(objectGroup);
@@ -181,6 +213,22 @@ function App() {
       disposeVoxelMesh(oldVoxelMesh);
     };
 
+    const rebuildWaterMesh = () => {
+      const oldWaterMesh = waterMesh;
+      waterMesh = createWaterMesh([...waterMap.values()]);
+      scene.add(waterMesh);
+      scene.remove(oldWaterMesh);
+      disposeWaterMesh(oldWaterMesh);
+    };
+
+    const rebuildFluidEffectGroup = () => {
+      const oldFluidEffectGroup = fluidEffectGroup;
+      fluidEffectGroup = createFluidEffectGroup([...fluidEffectMap.values()]);
+      scene.add(fluidEffectGroup);
+      scene.remove(oldFluidEffectGroup);
+      disposeFluidEffectGroup(oldFluidEffectGroup);
+    };
+
     const rebuildObjectGroup = () => {
       const oldObjectGroup = objectGroup;
       objectGroup = createObjectGroup([...objectMap.values()]);
@@ -204,6 +252,39 @@ function App() {
       });
 
       return removed;
+    };
+
+    const removeUnsupportedFluidEffects = () => {
+      let changed = false;
+
+      fluidEffectMap.forEach((effect, key) => {
+        const surface = getSurfaceCell(effect.x, effect.z);
+
+        if (!surface) {
+          fluidEffectMap.delete(key);
+          changed = true;
+          return;
+        }
+
+        const nextY = surface.y + 1;
+
+        if (effect.y !== nextY) {
+          fluidEffectMap.set(key, { ...effect, y: nextY });
+          changed = true;
+        }
+      });
+
+      return changed;
+    };
+
+    const settleWater = () => {
+      if (removeUnsupportedFluidEffects()) {
+        rebuildFluidEffectGroup();
+      }
+
+      if (validateWater(waterMap, voxelMap)) {
+        rebuildWaterMesh();
+      }
     };
 
     const getAvailableSurfaceCells = () => [...voxelMap.values()]
@@ -321,6 +402,26 @@ function App() {
       const targetKey = voxelKey(targetX, targetY, targetZ);
 
       if (event.shiftKey) {
+        if (selectedTool.kind === 'effect' && selectedTool.id === 'water') {
+          if (removeWaterDrop(waterMap, targetX, targetZ)) {
+            rebuildWaterMesh();
+          }
+
+          hoveredFace = null;
+          faceHighlight.visible = false;
+          return;
+        }
+
+        if (selectedTool.kind === 'effect') {
+          if (fluidEffectMap.delete(columnKey(targetX, targetZ))) {
+            rebuildFluidEffectGroup();
+          }
+
+          hoveredFace = null;
+          faceHighlight.visible = false;
+          return;
+        }
+
         if (selectedTool.kind === 'object') {
           if (normalIsUp) {
             objectMap.delete(targetKey);
@@ -333,6 +434,7 @@ function App() {
         }
 
         voxelMap.delete(voxelKey(x, y, z));
+        settleWater();
 
         if (removeUnsupportedObjects()) {
           rebuildObjectGroup();
@@ -344,8 +446,43 @@ function App() {
         return;
       }
 
+      if (selectedTool.kind === 'effect' && selectedTool.id === 'water') {
+        if (addWaterDrop(waterMap, voxelMap, targetX, targetZ)) {
+          rebuildWaterMesh();
+        }
+
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
+      if (selectedTool.kind === 'effect') {
+        const surface = getSurfaceCell(targetX, targetZ);
+
+        if (surface) {
+          const effectKey = columnKey(targetX, targetZ);
+          const effectY = surface.y + 1;
+
+          objectMap.delete(voxelKey(targetX, effectY, targetZ));
+          fluidEffectMap.set(effectKey, {
+            key: effectKey,
+            x: targetX,
+            y: effectY,
+            z: targetZ,
+            type: selectedTool.id,
+          });
+          rebuildObjectGroup();
+          rebuildFluidEffectGroup();
+        }
+
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
       if (selectedTool.kind === 'object') {
         if (normalIsUp && !voxelMap.has(targetKey)) {
+          fluidEffectMap.delete(columnKey(targetX, targetZ));
           objectMap.set(targetKey, {
             key: targetKey,
             x: targetX,
@@ -353,6 +490,7 @@ function App() {
             z: targetZ,
             type: selectedTool.id,
           });
+          rebuildFluidEffectGroup();
           rebuildObjectGroup();
         }
 
@@ -361,14 +499,22 @@ function App() {
         return;
       }
 
+      if (selectedTool.kind !== 'voxel' || !VOXEL_PALETTE[selectedTool.id]) {
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
       if (!voxelMap.has(targetKey)) {
         objectMap.delete(targetKey);
+        fluidEffectMap.delete(columnKey(targetX, targetZ));
         voxelMap.set(targetKey, {
           x: targetX,
           y: targetY,
           z: targetZ,
           type: selectedTool.id,
         });
+        settleWater();
         removeUnsupportedObjects();
         rebuildObjectGroup();
         rebuildVoxelMesh();
@@ -398,6 +544,7 @@ function App() {
     let hoveredFace = null;
     const pointerStart = new THREE.Vector2();
     const clock = new THREE.Clock();
+    let waterFlowElapsed = 0;
 
     const animate = () => {
       const deltaSeconds = clock.getDelta();
@@ -437,6 +584,20 @@ function App() {
 
       updateBirdFlock(birds, getBirdNests(), getSurfaceHeight, deltaSeconds);
       updateRabbitWarren(rabbits, getTrees(), getSurfaceCell, deltaSeconds);
+
+      waterFlowElapsed += Math.min(deltaSeconds, WATER_FLOW_INTERVAL_SECONDS);
+
+      if (waterFlowElapsed >= WATER_FLOW_INTERVAL_SECONDS) {
+        waterFlowElapsed = 0;
+
+        const effectsChanged = applyWaterEffects(waterMap, voxelMap, [...fluidEffectMap.values()]);
+        const flowChanged = flowWater(waterMap, voxelMap, 1);
+
+        if (effectsChanged || flowChanged) {
+          rebuildWaterMesh();
+        }
+      }
+
       controls.update();
       renderer.render(scene, camera);
       animationFrameId = window.requestAnimationFrame(animate);
@@ -458,6 +619,8 @@ function App() {
       faceHighlightGeometry.dispose();
       faceHighlightMaterial.dispose();
       disposeVoxelMesh(voxelMesh);
+      disposeWaterMesh(waterMesh);
+      disposeFluidEffectGroup(fluidEffectGroup);
       disposeObjectGroup(objectGroup);
       generateSceneRef.current = null;
     };
@@ -518,6 +681,22 @@ function App() {
                   style={{ backgroundColor: `#${objectType.color.toString(16).padStart(6, '0')}` }}
                 />
                 <span>{objectType.label}</span>
+              </button>
+            ))}
+            {EFFECT_TOOLS.map((effectTool) => (
+              <button
+                key={effectTool.id}
+                className={toolKey('effect', effectTool.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
+                type="button"
+                onClick={() => setSelectedTool({ kind: 'effect', id: effectTool.id })}
+                aria-pressed={toolKey('effect', effectTool.id) === toolKey(selectedTool.kind, selectedTool.id)}
+                title={effectTool.label}
+              >
+                <span
+                  className="swatch"
+                  style={{ backgroundColor: `#${effectTool.color.toString(16).padStart(6, '0')}` }}
+                />
+                <span>{effectTool.label}</span>
               </button>
             ))}
           </div>
