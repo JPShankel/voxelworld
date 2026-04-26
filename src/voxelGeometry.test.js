@@ -1,4 +1,5 @@
 import {
+  createMidpointDisplacementHeightfield,
   createVoxelMesh,
   createVoxelTerrain,
   disposeVoxelMesh,
@@ -6,10 +7,35 @@ import {
 } from './voxelGeometry';
 
 test('creates terrain voxel data', () => {
-  const terrain = createVoxelTerrain(2);
+  const terrain = createVoxelTerrain(2, { seed: 7 });
 
   expect(terrain.length).toBeGreaterThan(0);
   expect(terrain.some((voxel) => voxel.type === 'grass')).toBe(true);
+});
+
+test('creates seeded midpoint displacement heightfields', () => {
+  const heightfield = createMidpointDisplacementHeightfield(5, { seed: 42 });
+  const repeatedHeightfield = createMidpointDisplacementHeightfield(5, { seed: 42 });
+  const values = heightfield.flat();
+
+  expect(heightfield).toEqual(repeatedHeightfield);
+  expect(heightfield).toHaveLength(5);
+  expect(heightfield[0]).toHaveLength(5);
+  expect(Math.min(...values)).toBeGreaterThanOrEqual(0);
+  expect(Math.max(...values)).toBeLessThanOrEqual(1);
+  expect(new Set(values.map((value) => value.toFixed(3))).size).toBeGreaterThan(3);
+});
+
+test('creates varied terrain heights from midpoint displacement', () => {
+  const terrain = createVoxelTerrain(4, { seed: 11 });
+  const topHeights = new Map();
+
+  terrain.forEach((voxel) => {
+    const key = `${voxel.x},${voxel.z}`;
+    topHeights.set(key, Math.max(topHeights.get(key) ?? 0, voxel.y + 1));
+  });
+
+  expect(new Set([...topHeights.values()]).size).toBeGreaterThan(2);
 });
 
 test('builds exposed-face voxel geometry', () => {

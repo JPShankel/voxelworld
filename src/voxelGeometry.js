@@ -67,14 +67,124 @@ const FACE_DEFINITIONS = [
 
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
 
-export function createVoxelTerrain(radius = 16) {
+const createRandom = (seed) => {
+  if (seed === undefined || seed === null) {
+    return Math.random;
+  }
+
+  let state = seed >>> 0;
+
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+};
+
+const getDisplacementGridSize = (sampleSize) => {
+  let segmentCount = 1;
+
+  while (segmentCount < sampleSize - 1) {
+    segmentCount *= 2;
+  }
+
+  return segmentCount + 1;
+};
+
+export function createMidpointDisplacementHeightfield(size, options = {}) {
+  const gridSize = getDisplacementGridSize(size);
+  const lastIndex = gridSize - 1;
+  const random = createRandom(options.seed);
+  const roughness = options.roughness ?? 0.58;
+  const initialRange = options.initialRange ?? 1;
+  const heightfield = Array.from({ length: gridSize }, () => Array(gridSize).fill(0));
+  let displacement = initialRange;
+
+  heightfield[0][0] = random();
+  heightfield[0][lastIndex] = random();
+  heightfield[lastIndex][0] = random();
+  heightfield[lastIndex][lastIndex] = random();
+
+  for (let stepSize = lastIndex; stepSize > 1; stepSize /= 2) {
+    const halfStep = stepSize / 2;
+
+    for (let x = halfStep; x < lastIndex; x += stepSize) {
+      for (let z = halfStep; z < lastIndex; z += stepSize) {
+        const average = (
+          heightfield[x - halfStep][z - halfStep]
+          + heightfield[x + halfStep][z - halfStep]
+          + heightfield[x - halfStep][z + halfStep]
+          + heightfield[x + halfStep][z + halfStep]
+        ) / 4;
+
+        heightfield[x][z] = average + (random() * 2 - 1) * displacement;
+      }
+    }
+
+    for (let x = 0; x <= lastIndex; x += halfStep) {
+      const zStart = (x / halfStep) % 2 === 0 ? halfStep : 0;
+
+      for (let z = zStart; z <= lastIndex; z += stepSize) {
+        let total = 0;
+        let count = 0;
+
+        [
+          [x - halfStep, z],
+          [x + halfStep, z],
+          [x, z - halfStep],
+          [x, z + halfStep],
+        ].forEach(([neighborX, neighborZ]) => {
+          if (
+            neighborX >= 0
+            && neighborX <= lastIndex
+            && neighborZ >= 0
+            && neighborZ <= lastIndex
+          ) {
+            total += heightfield[neighborX][neighborZ];
+            count += 1;
+          }
+        });
+
+        heightfield[x][z] = total / count + (random() * 2 - 1) * displacement;
+      }
+    }
+
+    displacement *= roughness;
+  }
+
+  let minHeight = Infinity;
+  let maxHeight = -Infinity;
+
+  heightfield.forEach((row) => {
+    row.forEach((height) => {
+      minHeight = Math.min(minHeight, height);
+      maxHeight = Math.max(maxHeight, height);
+    });
+  });
+
+  const heightRange = maxHeight - minHeight || 1;
+  const offset = Math.floor((gridSize - size) / 2);
+
+  return Array.from({ length: size }, (_, x) => (
+    Array.from({ length: size }, (_, z) => (
+      (heightfield[x + offset][z + offset] - minHeight) / heightRange
+    ))
+  ));
+}
+
+export function createVoxelTerrain(radius = 16, options = {}) {
   const voxels = [];
+  const size = radius * 2 + 1;
+  const heightfield = createMidpointDisplacementHeightfield(size, options);
+  const minHeight = options.minHeight ?? 1;
+  const maxHeight = options.maxHeight ?? Math.max(3, Math.round(radius * 0.72));
 
   for (let x = -radius; x <= radius; x += 1) {
     for (let z = -radius; z <= radius; z += 1) {
-      const distance = Math.sqrt(x * x + z * z);
-      const ripple = Math.sin(x * 0.85) * 0.4 + Math.cos(z * 0.7) * 0.35;
-      const height = Math.max(1, Math.floor(radius * 0.45 - distance * 0.24 + ripple));
+      const normalizedHeight = heightfield[x + radius][z + radius];
+      const height = Math.max(
+        minHeight,
+        Math.round(minHeight + normalizedHeight * (maxHeight - minHeight))
+      );
 
       for (let y = 0; y < height; y += 1) {
         let type = 'stone';

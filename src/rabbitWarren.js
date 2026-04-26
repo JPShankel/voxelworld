@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VOXEL_SIZE } from './voxelGeometry';
 
 export const RABBITS_PER_HUTCH = 3;
+export const RABBIT_DRINK_AMOUNT = 0.08;
 
 const rabbitMaterial = new THREE.MeshStandardMaterial({
   color: 0xf2f0e8,
@@ -151,7 +152,7 @@ export function syncRabbitWarren(rabbits, rabbitGroup, hutches, getSurfaceCell) 
   });
 }
 
-export function updateRabbitWarren(rabbits, trees, getSurfaceCell, deltaSeconds) {
+export function updateRabbitWarren(rabbits, trees, getSurfaceCell, deltaSeconds, onRabbitHop = () => {}) {
   const treeMap = new Map(trees.map((tree) => [tree.key, tree]));
   const deltaScale = Math.min(deltaSeconds, 0.05);
 
@@ -186,6 +187,7 @@ export function updateRabbitWarren(rabbits, trees, getSurfaceCell, deltaSeconds)
         }
 
         rabbit.cell = nextCell;
+        onRabbitHop(nextCell, rabbit);
         rabbit.moveTimer = 0.34 + Math.random() * 0.2;
         rabbit.hopPhase = 0;
       }

@@ -14,8 +14,22 @@ import {
   createFluidEffectGroup,
   disposeFluidEffectGroup,
 } from './fluidEffectGeometry';
-import { syncBirdFlock, updateBirdFlock } from './birdFlock';
-import { syncRabbitWarren, updateRabbitWarren } from './rabbitWarren';
+import {
+  FISH_WATER_LEVEL_THRESHOLD,
+  createFishGroup,
+  disposeFishGroup,
+  updateFishGroup,
+} from './fishGeometry';
+import {
+  FISH_EATEN_COOLDOWN_SECONDS,
+  syncBirdFlock,
+  updateBirdFlock,
+} from './birdFlock';
+import {
+  RABBIT_DRINK_AMOUNT,
+  syncRabbitWarren,
+  updateRabbitWarren,
+} from './rabbitWarren';
 import {
   WATER_COLOR,
   addWaterDrop,
@@ -24,6 +38,7 @@ import {
   createWaterMesh,
   disposeWaterMesh,
   flowWater,
+  removeWaterAmount,
   removeWaterDrop,
   validateWater,
 } from './waterGeometry';
@@ -47,10 +62,15 @@ const DEFAULT_SCENE_COUNTS = {
 };
 
 const WATER_FLOW_INTERVAL_SECONDS = 0.05;
-
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
 const columnKey = (x, z) => `${x},${z}`;
 const toolKey = (kind, id) => `${kind}:${id}`;
+const getTimeOfDaySeed = (date = new Date()) => (
+  date.getHours() * 60 * 60 * 1000
+  + date.getMinutes() * 60 * 1000
+  + date.getSeconds() * 1000
+  + date.getMilliseconds()
+);
 
 function App() {
   const mountRef = useRef(null);
@@ -167,6 +187,10 @@ function App() {
     let waterMesh = createWaterMesh([...waterMap.values()]);
     scene.add(waterMesh);
 
+    let fishGroup = createFishGroup([...waterMap.values()]);
+    scene.add(fishGroup);
+    const eatenFishTimers = new Map();
+
     const fluidEffectMap = new Map();
     let fluidEffectGroup = createFluidEffectGroup([...fluidEffectMap.values()]);
     scene.add(fluidEffectGroup);
@@ -213,12 +237,36 @@ function App() {
       disposeVoxelMesh(oldVoxelMesh);
     };
 
+    const rebuildTerrain = (seed) => {
+      voxelMap.clear();
+      createVoxelTerrain(17, { seed }).forEach((voxel) => {
+        voxelMap.set(voxelKey(voxel.x, voxel.y, voxel.z), voxel);
+      });
+
+      waterMap.clear();
+      eatenFishTimers.clear();
+      fluidEffectMap.clear();
+      objectMap.clear();
+      rebuildVoxelMesh();
+      rebuildWaterMesh();
+      rebuildFluidEffectGroup();
+    };
+
+    const rebuildFishGroup = () => {
+      const oldFishGroup = fishGroup;
+      fishGroup = createFishGroup([...waterMap.values()], new Set(eatenFishTimers.keys()));
+      scene.add(fishGroup);
+      scene.remove(oldFishGroup);
+      disposeFishGroup(oldFishGroup);
+    };
+
     const rebuildWaterMesh = () => {
       const oldWaterMesh = waterMesh;
       waterMesh = createWaterMesh([...waterMap.values()]);
       scene.add(waterMesh);
       scene.remove(oldWaterMesh);
       disposeWaterMesh(oldWaterMesh);
+      rebuildFishGroup();
     };
 
     const rebuildFluidEffectGroup = () => {
@@ -287,6 +335,9 @@ function App() {
       }
     };
 
+    const getFishTargets = () => [...waterMap.values()]
+      .filter((cell) => cell.level >= FISH_WATER_LEVEL_THRESHOLD && !eatenFishTimers.has(cell.key));
+
     const getAvailableSurfaceCells = () => [...voxelMap.values()]
       .filter((voxel) => voxel.type === 'grass' && !voxelMap.has(voxelKey(voxel.x, voxel.y + 1, voxel.z)))
       .map((voxel) => ({ x: voxel.x, y: voxel.y + 1, z: voxel.z }));
@@ -302,7 +353,11 @@ function App() {
       return shuffled;
     };
 
-    const generateScene = ({ trees, hutches, nests }) => {
+    const generateScene = ({ trees, hutches, nests }, options = {}) => {
+      if (options.reseedTerrain) {
+        rebuildTerrain(getTimeOfDaySeed());
+      }
+
       const objectQueue = [
         ...Array.from({ length: trees }, () => 'tree'),
         ...Array.from({ length: hutches }, () => 'rabbitHutch'),
@@ -582,8 +637,61 @@ function App() {
         faceHighlight.visible = false;
       }
 
-      updateBirdFlock(birds, getBirdNests(), getSurfaceHeight, deltaSeconds);
-      updateRabbitWarren(rabbits, getTrees(), getSurfaceCell, deltaSeconds);
+      updateFishGroup(fishGroup, clock.elapsedTime);
+      let fishChanged = false;
+
+      eatenFishTimers.forEach((remainingSeconds, key) => {
+        const waterCell = waterMap.get(key);
+        const nextRemainingSeconds = remainingSeconds - deltaSeconds;
+
+        if (!waterCell || waterCell.level < FISH_WATER_LEVEL_THRESHOLD) {
+          eatenFishTimers.delete(key);
+          return;
+        }
+
+        if (nextRemainingSeconds <= 0) {
+          eatenFishTimers.delete(key);
+          fishChanged = true;
+          return;
+        }
+
+        eatenFishTimers.set(key, nextRemainingSeconds);
+      });
+
+      updateBirdFlock(
+        birds,
+        getBirdNests(),
+        getSurfaceHeight,
+        deltaSeconds,
+        {
+          getFishTargets,
+          onFishEaten: (cell) => {
+            if (!eatenFishTimers.has(cell.key)) {
+              eatenFishTimers.set(cell.key, FISH_EATEN_COOLDOWN_SECONDS);
+              fishChanged = true;
+            }
+          },
+        }
+      );
+
+      if (fishChanged) {
+        rebuildFishGroup();
+      }
+      let rabbitsDrankWater = false;
+      updateRabbitWarren(
+        rabbits,
+        getTrees(),
+        getSurfaceCell,
+        deltaSeconds,
+        (cell) => {
+          rabbitsDrankWater = removeWaterAmount(waterMap, cell.x, cell.z, RABBIT_DRINK_AMOUNT)
+            || rabbitsDrankWater;
+        }
+      );
+
+      if (rabbitsDrankWater) {
+        rebuildWaterMesh();
+      }
 
       waterFlowElapsed += Math.min(deltaSeconds, WATER_FLOW_INTERVAL_SECONDS);
 
@@ -620,6 +728,7 @@ function App() {
       faceHighlightMaterial.dispose();
       disposeVoxelMesh(voxelMesh);
       disposeWaterMesh(waterMesh);
+      disposeFishGroup(fishGroup);
       disposeFluidEffectGroup(fluidEffectGroup);
       disposeObjectGroup(objectGroup);
       generateSceneRef.current = null;
@@ -635,7 +744,7 @@ function App() {
 
   const handleGenerateScene = (event) => {
     event.preventDefault();
-    generateSceneRef.current?.(sceneCounts);
+    generateSceneRef.current?.(sceneCounts, { reseedTerrain: true });
   };
 
   return (

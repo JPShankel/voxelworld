@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VOXEL_SIZE } from './voxelGeometry';
 
 export const BIRDS_PER_NEST = 6;
+export const FISH_EATEN_COOLDOWN_SECONDS = 10;
 
 const birdMaterial = new THREE.MeshStandardMaterial({
   color: 0x2f80ed,
@@ -72,6 +73,9 @@ function createBird(nest, index) {
     nestKey: nest.key,
     position,
     velocity,
+    diveCooldown: 2 + index * 1.1,
+    diveTarget: null,
+    diveHasEaten: false,
     mesh,
   };
 }
@@ -101,13 +105,27 @@ export function syncBirdFlock(birds, birdGroup, nests) {
   });
 }
 
-export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds) {
+export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, options = {}) {
   const nestMap = new Map(nests.map((nest) => [nest.key, nest]));
   const positions = birds.map((bird) => bird.position.clone());
   const velocities = birds.map((bird) => bird.velocity.clone());
   const deltaScale = Math.min(deltaSeconds * 60, 2);
+  const getFishTargets = options.getFishTargets ?? (() => []);
+  const onFishEaten = options.onFishEaten ?? (() => {});
 
   birds.forEach((bird, index) => {
+    bird.diveCooldown = Math.max(0, (bird.diveCooldown ?? 0) - deltaSeconds);
+
+    if (!bird.diveTarget && bird.diveCooldown <= 0) {
+      const fishTargets = getFishTargets(bird);
+
+      if (fishTargets.length > 0 && Math.random() < 0.018) {
+        const targetIndex = Math.floor(Math.random() * fishTargets.length);
+        bird.diveTarget = fishTargets[targetIndex];
+        bird.diveHasEaten = false;
+      }
+    }
+
     const separation = new THREE.Vector3();
     const alignment = new THREE.Vector3();
     const cohesion = new THREE.Vector3();
@@ -166,6 +184,35 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds) {
       .add(homeForce)
       .add(lift)
       .add(drift);
+
+    if (bird.diveTarget) {
+      const targetPosition = new THREE.Vector3(
+        (bird.diveTarget.x + 0.5) * VOXEL_SIZE,
+        bird.diveTarget.y * VOXEL_SIZE + 4,
+        (bird.diveTarget.z + 0.5) * VOXEL_SIZE
+      );
+      const diveForce = targetPosition.sub(bird.position);
+      const distanceToTarget = diveForce.length();
+
+      if (distanceToTarget > 0.001) {
+        bird.velocity.add(diveForce.setLength(0.09));
+      }
+
+      if (!bird.diveHasEaten && distanceToTarget < 7) {
+        bird.diveHasEaten = true;
+        onFishEaten(bird.diveTarget, bird);
+      }
+
+      if (bird.diveHasEaten || distanceToTarget < 4) {
+        const homeNest = nestMap.get(bird.nestKey);
+        const home = homeNest ? nestPosition(homeNest) : bird.position;
+
+        if (bird.position.distanceTo(home) < 28 || bird.diveHasEaten) {
+          bird.diveTarget = null;
+          bird.diveCooldown = 5 + Math.random() * 7;
+        }
+      }
+    }
 
     if (bird.velocity.length() > 0.58) {
       bird.velocity.setLength(0.58);

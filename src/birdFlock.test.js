@@ -28,3 +28,23 @@ test('updates bird movement above terrain', () => {
 
   expect(birds[0].position.y).toBeGreaterThanOrEqual(18);
 });
+
+test('birds eat fish when they dive close to a fish target', () => {
+  const birds = [];
+  const birdGroup = new THREE.Group();
+  const nest = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'birdNest' };
+  const fishTarget = { key: '0,0', x: 0, y: 1, z: 0 };
+  const eatenFish = [];
+
+  syncBirdFlock(birds, birdGroup, [nest]);
+  birds[0].diveTarget = fishTarget;
+  birds[0].diveHasEaten = false;
+  birds[0].position.set(5, 14, 5);
+
+  updateBirdFlock(birds, [nest], () => 0, 1 / 60, {
+    onFishEaten: (cell) => eatenFish.push(cell),
+  });
+
+  expect(eatenFish).toEqual([fishTarget]);
+  expect(birds[0].diveTarget).toBeNull();
+});

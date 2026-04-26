@@ -36,3 +36,22 @@ test('rabbits choose trees and move across one-level terrain steps', () => {
 
   Math.random.mockRestore();
 });
+
+test('reports the cell where rabbits hop so they can drink water', () => {
+  jest.spyOn(Math, 'random').mockReturnValue(0);
+  const rabbits = [];
+  const rabbitGroup = new THREE.Group();
+  const hutch = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'rabbitHutch' };
+  const hoppedCells = [];
+
+  syncRabbitWarren(rabbits, rabbitGroup, [hutch], flatSurface);
+  rabbits[0].moveTimer = 0;
+  updateRabbitWarren(rabbits, [], flatSurface, 1, (cell) => {
+    hoppedCells.push(cell);
+  });
+
+  expect(hoppedCells).toHaveLength(RABBITS_PER_HUTCH);
+  expect(hoppedCells[0]).toMatchObject(rabbits[0].cell);
+
+  Math.random.mockRestore();
+});
