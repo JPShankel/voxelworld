@@ -11,11 +11,27 @@ export const OBJECT_TYPES = [
 const MATERIALS = {
   trunk: new THREE.MeshStandardMaterial({ color: 0x7a4b28, roughness: 0.85 }),
   leaves: new THREE.MeshStandardMaterial({ color: 0x2f7d32, roughness: 0.8 }),
+  fruit: new THREE.MeshStandardMaterial({ color: 0xd94b3d, roughness: 0.58 }),
   stone: new THREE.MeshStandardMaterial({ color: 0x7f8588, roughness: 0.9 }),
   twigs: new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 0.9 }),
   hutch: new THREE.MeshStandardMaterial({ color: 0xb98252, roughness: 0.82 }),
   roof: new THREE.MeshStandardMaterial({ color: 0x5f3821, roughness: 0.85 }),
 };
+
+const MAX_TREE_FRUIT = 6;
+const FRUIT_POSITIONS = [
+  [-2.4, 9.4, -2.2],
+  [2.5, 10.6, -1.7],
+  [-1.8, 12.1, 2.6],
+  [2.1, 13.4, 1.9],
+  [0.2, 15.2, -2.1],
+  [-2.6, 14.3, 0.7],
+];
+
+function getFruitCount(tree) {
+  const fallbackCount = (tree.fruitLevel ?? 1) >= 1 ? MAX_TREE_FRUIT : 0;
+  return Math.max(0, Math.min(MAX_TREE_FRUIT, Math.floor(tree.fruitCount ?? fallbackCount)));
+}
 
 function makePart(geometry, material, position, scale = [1, 1, 1]) {
   const mesh = new THREE.Mesh(geometry, material);
@@ -26,11 +42,16 @@ function makePart(geometry, material, position, scale = [1, 1, 1]) {
   return mesh;
 }
 
-function createTree() {
+function createTree(tree) {
   const group = new THREE.Group();
   group.add(makePart(new THREE.BoxGeometry(2.2, 8, 2.2), MATERIALS.trunk, [0, 4, 0]));
   group.add(makePart(new THREE.BoxGeometry(7.5, 6, 7.5), MATERIALS.leaves, [0, 10, 0]));
   group.add(makePart(new THREE.BoxGeometry(5.5, 4, 5.5), MATERIALS.leaves, [0, 14, 0]));
+
+  FRUIT_POSITIONS.slice(0, getFruitCount(tree)).forEach((position) => {
+    group.add(makePart(new THREE.SphereGeometry(1.08, 12, 10), MATERIALS.fruit, position));
+  });
+
   return group;
 }
 
@@ -55,9 +76,11 @@ function createRabbitHutch() {
   return group;
 }
 
-function createObjectByType(type) {
+function createObjectByType(object) {
+  const { type } = object;
+
   if (type === 'tree') {
-    return createTree();
+    return createTree(object);
   }
 
   if (type === 'boulder') {
@@ -76,7 +99,7 @@ export function createObjectGroup(objects) {
   group.name = 'placed-objects';
 
   objects.forEach((object) => {
-    const mesh = createObjectByType(object.type);
+    const mesh = createObjectByType(object);
     mesh.position.set(
       (object.x + 0.5) * VOXEL_SIZE,
       object.y * VOXEL_SIZE,

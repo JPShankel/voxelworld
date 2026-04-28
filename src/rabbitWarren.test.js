@@ -55,3 +55,33 @@ test('reports the cell where rabbits hop so they can drink water', () => {
 
   Math.random.mockRestore();
 });
+
+test('rabbits only target trees with fruit and remove fruit when they eat', () => {
+  jest.spyOn(Math, 'random').mockReturnValue(0);
+  const rabbits = [];
+  const rabbitGroup = new THREE.Group();
+  const hutch = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'rabbitHutch' };
+  const emptyTree = { key: '1,1,0', x: 1, y: 1, z: 0, type: 'tree', fruitCount: 0 };
+  const fruitingTree = { key: '2,1,0', x: 2, y: 1, z: 0, type: 'tree', fruitCount: 6 };
+  const eatenTrees = [];
+
+  syncRabbitWarren(rabbits, rabbitGroup, [hutch], flatSurface);
+  rabbits[0].cell = { x: 2, y: 0, z: 0 };
+  rabbits[0].position.set(25, 10, 5);
+
+  updateRabbitWarren(
+    [rabbits[0]],
+    [emptyTree, fruitingTree],
+    flatSurface,
+    1 / 60,
+    () => {},
+    (tree) => eatenTrees.push(tree.key)
+  );
+
+  expect(rabbits[0].targetTreeKey).toBe(fruitingTree.key);
+  expect(eatenTrees).toEqual([fruitingTree.key]);
+  expect(fruitingTree.fruitCount).toBe(5);
+  expect(emptyTree.fruitCount).toBe(0);
+
+  Math.random.mockRestore();
+});

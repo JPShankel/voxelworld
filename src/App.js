@@ -63,6 +63,8 @@ const DEFAULT_SCENE_COUNTS = {
 };
 
 const WATER_FLOW_INTERVAL_SECONDS = 0.05;
+const MAX_TREE_FRUIT = 6;
+const TREE_FRUIT_REGROW_SECONDS = 6;
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
 const columnKey = (x, z) => `${x},${z}`;
 const toolKey = (kind, id) => `${kind}:${id}`;
@@ -214,6 +216,30 @@ function App() {
     const getBirdNests = () => [...objectMap.values()].filter((object) => object.type === 'birdNest');
     const getRabbitHutches = () => [...objectMap.values()].filter((object) => object.type === 'rabbitHutch');
     const getTrees = () => [...objectMap.values()].filter((object) => object.type === 'tree');
+
+    const getTreeFruitCount = (tree) => {
+      const fallbackCount = (tree?.fruitLevel ?? 1) >= 1 ? MAX_TREE_FRUIT : 0;
+      return Math.max(0, Math.min(MAX_TREE_FRUIT, Math.floor(tree?.fruitCount ?? fallbackCount)));
+    };
+
+    const setTreeFruitCount = (tree, fruitCount) => {
+      const currentTree = objectMap.get(tree.key);
+
+      if (!currentTree || currentTree.type !== 'tree') {
+        return false;
+      }
+
+      const nextFruitCount = Math.max(0, Math.min(MAX_TREE_FRUIT, Math.floor(fruitCount)));
+
+      objectMap.set(tree.key, {
+        ...currentTree,
+        fruitCount: nextFruitCount,
+        fruitLevel: nextFruitCount,
+        fruitRegrowTimer: nextFruitCount >= MAX_TREE_FRUIT ? 0 : TREE_FRUIT_REGROW_SECONDS,
+      });
+
+      return true;
+    };
 
     const getSurfaceCell = (x, z) => {
       let highestY = -1;
@@ -385,6 +411,7 @@ function App() {
           y: cell.y,
           z: cell.z,
           type,
+          ...(type === 'tree' ? { fruitCount: MAX_TREE_FRUIT, fruitLevel: MAX_TREE_FRUIT, fruitRegrowTimer: 0 } : {}),
         });
       });
 
@@ -548,6 +575,7 @@ function App() {
             y: targetY,
             z: targetZ,
             type: selectedTool.id,
+            ...(selectedTool.id === 'tree' ? { fruitCount: MAX_TREE_FRUIT, fruitLevel: MAX_TREE_FRUIT, fruitRegrowTimer: 0 } : {}),
           });
           rebuildFluidEffectGroup();
           rebuildObjectGroup();
@@ -681,6 +709,43 @@ function App() {
       if (fishChanged) {
         rebuildFishGroup();
       }
+
+      let treeFruitChanged = false;
+
+      objectMap.forEach((object) => {
+        if (object.type !== 'tree') {
+          return;
+        }
+
+        const fruitCount = getTreeFruitCount(object);
+
+        if (fruitCount >= MAX_TREE_FRUIT) {
+          return;
+        }
+
+        const nextTimer = Math.max(0, (object.fruitRegrowTimer ?? TREE_FRUIT_REGROW_SECONDS) - deltaSeconds);
+
+        if (nextTimer <= 0) {
+          const nextFruitCount = fruitCount + 1;
+
+          objectMap.set(object.key, {
+            ...object,
+            fruitCount: nextFruitCount,
+            fruitLevel: nextFruitCount,
+            fruitRegrowTimer: nextFruitCount >= MAX_TREE_FRUIT ? 0 : TREE_FRUIT_REGROW_SECONDS,
+          });
+          treeFruitChanged = true;
+          return;
+        }
+
+        objectMap.set(object.key, {
+          ...object,
+          fruitCount,
+          fruitLevel: fruitCount,
+          fruitRegrowTimer: nextTimer,
+        });
+      });
+
       let rabbitsDrankWater = false;
       updateRabbitWarren(
         rabbits,
@@ -690,8 +755,15 @@ function App() {
         (cell) => {
           rabbitsDrankWater = removeWaterAmount(waterMap, cell.x, cell.z, RABBIT_DRINK_AMOUNT)
             || rabbitsDrankWater;
+        },
+        (tree) => {
+          treeFruitChanged = setTreeFruitCount(tree, tree.fruitCount ?? 0) || treeFruitChanged;
         }
       );
+
+      if (treeFruitChanged) {
+        rebuildObjectGroup();
+      }
 
       if (rabbitsDrankWater) {
         rebuildWaterMesh();

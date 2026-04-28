@@ -4,6 +4,13 @@ import { VOXEL_SIZE } from './voxelGeometry';
 export const RABBITS_PER_HUTCH = 3;
 export const RABBIT_DRINK_AMOUNT = 0.08;
 
+const MAX_TREE_FRUIT = 6;
+const getFruitCount = (tree) => {
+  const fallbackCount = (tree?.fruitLevel ?? 1) >= 1 ? MAX_TREE_FRUIT : 0;
+  return Math.max(0, Math.min(MAX_TREE_FRUIT, Math.floor(tree?.fruitCount ?? fallbackCount)));
+};
+const treeHasFruit = (tree) => getFruitCount(tree) > 0;
+
 const rabbitMaterial = new THREE.MeshStandardMaterial({
   color: 0xf2f0e8,
   roughness: 0.78,
@@ -62,12 +69,14 @@ function createRabbit(hutch, index, getSurfaceCell) {
 }
 
 function chooseTree(rabbit, trees) {
-  if (trees.length === 0) {
+  const fruitingTrees = trees.filter(treeHasFruit);
+
+  if (fruitingTrees.length === 0) {
     rabbit.targetTreeKey = null;
     return null;
   }
 
-  const sortedTrees = [...trees].sort((a, b) => {
+  const sortedTrees = [...fruitingTrees].sort((a, b) => {
     const distanceA = Math.abs(a.x - rabbit.cell.x) + Math.abs(a.z - rabbit.cell.z);
     const distanceB = Math.abs(b.x - rabbit.cell.x) + Math.abs(b.z - rabbit.cell.z);
     return distanceA - distanceB;
@@ -152,12 +161,24 @@ export function syncRabbitWarren(rabbits, rabbitGroup, hutches, getSurfaceCell) 
   });
 }
 
-export function updateRabbitWarren(rabbits, trees, getSurfaceCell, deltaSeconds, onRabbitHop = () => {}) {
+export function updateRabbitWarren(
+  rabbits,
+  trees,
+  getSurfaceCell,
+  deltaSeconds,
+  onRabbitHop = () => {},
+  onFruitEaten = () => {}
+) {
   const treeMap = new Map(trees.map((tree) => [tree.key, tree]));
   const deltaScale = Math.min(deltaSeconds, 0.05);
 
   rabbits.forEach((rabbit) => {
     let targetTree = treeMap.get(rabbit.targetTreeKey);
+
+    if (targetTree && !treeHasFruit(targetTree) && rabbit.eatingTimer <= 0) {
+      rabbit.targetTreeKey = null;
+      targetTree = null;
+    }
 
     if (!targetTree) {
       targetTree = chooseTree(rabbit, trees);
@@ -167,6 +188,9 @@ export function updateRabbitWarren(rabbits, trees, getSurfaceCell, deltaSeconds,
 
     if (atTree && rabbit.eatingTimer <= 0) {
       rabbit.eatingTimer = 2.2 + Math.random() * 2.3;
+      targetTree.fruitCount = Math.max(0, getFruitCount(targetTree) - 1);
+      targetTree.fruitLevel = targetTree.fruitCount;
+      onFruitEaten(targetTree, rabbit);
     }
 
     if (rabbit.eatingTimer > 0) {
