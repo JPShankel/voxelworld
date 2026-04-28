@@ -2,7 +2,9 @@ import {
   FISH_WATER_LEVEL_THRESHOLD,
   createFishGroup,
   disposeFishGroup,
+  syncFishShoal,
   updateFishGroup,
+  updateFishShoal,
 } from './fishGeometry';
 
 test('creates fish only in water deep enough to support them', () => {
@@ -55,6 +57,74 @@ test('animates fish swimming inside deep water cells', () => {
   updateFishGroup(fishGroup, 1);
 
   expect(fish.position.equals(initialPosition)).toBe(false);
+
+  disposeFishGroup(fishGroup);
+});
+
+test('keeps fish as independent creatures that can swim into neighboring cells', () => {
+  const waterCells = [
+    { key: '0,0', x: 0, y: 1, z: 0, level: FISH_WATER_LEVEL_THRESHOLD },
+    { key: '1,0', x: 1, y: 1, z: 0, level: FISH_WATER_LEVEL_THRESHOLD },
+  ];
+  const fishGroup = createFishGroup(waterCells);
+  const fishShoal = fishGroup.userData.fish;
+  const fish = fishShoal[0];
+  const originalKey = fish.key;
+  const originalMesh = fish.mesh;
+  const originalX = fish.position.x;
+
+  fish.targetCell = waterCells[1];
+
+  for (let index = 0; index < 60; index += 1) {
+    updateFishShoal(fishShoal, waterCells, 1 / 30);
+  }
+
+  expect(fish.key).toBe(originalKey);
+  expect(fish.mesh).toBe(originalMesh);
+  expect(fish.position.x).toBeGreaterThan(originalX);
+
+  syncFishShoal(fishShoal, fishGroup, waterCells);
+
+  expect(fishShoal).toContain(fish);
+  expect(fishGroup.children).toContain(originalMesh);
+
+  disposeFishGroup(fishGroup);
+});
+
+test('lets fish leave a deep source cell through shallow flowing water', () => {
+  const waterCells = [
+    { key: '0,0', x: 0, y: 1, z: 0, level: FISH_WATER_LEVEL_THRESHOLD },
+    { key: '1,0', x: 1, y: 1, z: 0, level: 0.25 },
+  ];
+  const fishGroup = createFishGroup(waterCells);
+  const fish = fishGroup.userData.fish[0];
+  const originalX = fish.position.x;
+
+  for (let index = 0; index < 60; index += 1) {
+    updateFishShoal(fishGroup.userData.fish, waterCells, 1 / 30);
+  }
+
+  expect(fish.position.x).toBeGreaterThan(originalX);
+
+  syncFishShoal(fishGroup.userData.fish, fishGroup, waterCells);
+
+  expect(fishGroup.userData.fish).toContain(fish);
+
+  disposeFishGroup(fishGroup);
+});
+
+test('points fish nose toward its swim direction', () => {
+  const waterCells = [
+    { key: '0,0', x: 0, y: 1, z: 0, level: FISH_WATER_LEVEL_THRESHOLD },
+    { key: '1,0', x: 1, y: 1, z: 0, level: FISH_WATER_LEVEL_THRESHOLD },
+  ];
+  const fishGroup = createFishGroup(waterCells);
+  const fish = fishGroup.userData.fish[0];
+
+  fish.targetCell = waterCells[1];
+  updateFishShoal(fishGroup.userData.fish, waterCells, 1 / 30);
+
+  expect(Math.cos(fish.mesh.rotation.y)).toBeLessThan(0);
 
   disposeFishGroup(fishGroup);
 });

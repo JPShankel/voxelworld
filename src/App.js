@@ -18,7 +18,8 @@ import {
   FISH_WATER_LEVEL_THRESHOLD,
   createFishGroup,
   disposeFishGroup,
-  updateFishGroup,
+  syncFishShoal,
+  updateFishShoal,
 } from './fishGeometry';
 import {
   FISH_EATEN_COOLDOWN_SECONDS,
@@ -188,6 +189,7 @@ function App() {
     scene.add(waterMesh);
 
     let fishGroup = createFishGroup([...waterMap.values()]);
+    const fishShoal = fishGroup.userData.fish;
     scene.add(fishGroup);
     const eatenFishTimers = new Map();
 
@@ -253,11 +255,7 @@ function App() {
     };
 
     const rebuildFishGroup = () => {
-      const oldFishGroup = fishGroup;
-      fishGroup = createFishGroup([...waterMap.values()], new Set(eatenFishTimers.keys()));
-      scene.add(fishGroup);
-      scene.remove(oldFishGroup);
-      disposeFishGroup(oldFishGroup);
+      syncFishShoal(fishShoal, fishGroup, [...waterMap.values()], new Set(eatenFishTimers.keys()));
     };
 
     const rebuildWaterMesh = () => {
@@ -335,8 +333,14 @@ function App() {
       }
     };
 
-    const getFishTargets = () => [...waterMap.values()]
-      .filter((cell) => cell.level >= FISH_WATER_LEVEL_THRESHOLD && !eatenFishTimers.has(cell.key));
+    const getFishTargets = () => fishShoal
+      .filter((fish) => !eatenFishTimers.has(fish.key))
+      .map((fish) => ({
+        key: fish.key,
+        x: fish.cell.x,
+        y: fish.cell.y,
+        z: fish.cell.z,
+      }));
 
     const getAvailableSurfaceCells = () => [...voxelMap.values()]
       .filter((voxel) => voxel.type === 'grass' && !voxelMap.has(voxelKey(voxel.x, voxel.y + 1, voxel.z)))
@@ -637,7 +641,7 @@ function App() {
         faceHighlight.visible = false;
       }
 
-      updateFishGroup(fishGroup, clock.elapsedTime);
+      updateFishShoal(fishShoal, [...waterMap.values()], deltaSeconds);
       let fishChanged = false;
 
       eatenFishTimers.forEach((remainingSeconds, key) => {
