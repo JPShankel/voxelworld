@@ -43,6 +43,13 @@ import {
   removeWaterDrop,
   validateWater,
 } from './waterGeometry';
+import {
+  deleteScene,
+  isSupabaseConfigured,
+  listScenes,
+  loadScene,
+  saveScene,
+} from './supabaseScenes';
 import './App.css';
 
 const VOXEL_TYPES = [
@@ -120,19 +127,52 @@ function disposeGroundGrid(grid) {
   grid.userData.gridMaterial?.dispose();
 }
 
+function formatSavedScene(scene, index) {
+  const date = scene.created_at ? new Date(scene.created_at).toLocaleString() : 'unknown date';
+  return `${index + 1}. ${scene.name} (${date})`;
+}
+
+function chooseSavedScene(scenes, action) {
+  if (scenes.length === 0) {
+    throw new Error('No saved scenes found.');
+  }
+
+  const menu = scenes.map(formatSavedScene).join('\n');
+  const choice = window.prompt(`${action} which scene?\n${menu}`, '1');
+  const selectedIndex = Number.parseInt(choice, 10) - 1;
+
+  if (choice === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= scenes.length) {
+    throw new Error('Choose a valid scene number.');
+  }
+
+  return scenes[selectedIndex];
+}
+
 function App() {
   const mountRef = useRef(null);
   const controlPanelRef = useRef(null);
   const generateSceneRef = useRef(null);
   const clearSceneRef = useRef(null);
+  const saveSceneRef = useRef(null);
+  const loadSceneRef = useRef(null);
   const [selectedTool, setSelectedTool] = useState({ kind: 'voxel', id: 'grass' });
   const [sceneCounts, setSceneCounts] = useState(DEFAULT_SCENE_COUNTS);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [saveStatus, setSaveStatus] = useState('');
   const selectedToolRef = useRef(selectedTool);
+  const sceneCountsRef = useRef(sceneCounts);
 
   useEffect(() => {
     selectedToolRef.current = selectedTool;
   }, [selectedTool]);
+
+  useEffect(() => {
+    sceneCountsRef.current = sceneCounts;
+  }, [sceneCounts]);
 
   useEffect(() => {
     const revealDistance = 96;
@@ -472,7 +512,67 @@ function App() {
       rebuildObjectGroup();
     };
 
+    const createSceneSnapshot = () => ({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      sceneCounts: sceneCountsRef.current,
+      voxels: [...voxelMap.values()],
+      water: [...waterMap.values()],
+      fluidEffects: [...fluidEffectMap.values()],
+      objects: [...objectMap.values()],
+      eatenFishTimers: [...eatenFishTimers.entries()].map(([key, remainingSeconds]) => ({
+        key,
+        remainingSeconds,
+      })),
+    });
+
+    const applySceneSnapshot = (payload = {}) => {
+      voxelMap.clear();
+      (payload.voxels ?? []).forEach((voxel) => {
+        voxelMap.set(voxelKey(voxel.x, voxel.y, voxel.z), voxel);
+      });
+
+      waterMap.clear();
+      (payload.water ?? []).forEach((cell) => {
+        waterMap.set(columnKey(cell.x, cell.z), cell);
+      });
+
+      fluidEffectMap.clear();
+      (payload.fluidEffects ?? []).forEach((effect) => {
+        fluidEffectMap.set(effect.key ?? columnKey(effect.x, effect.z), effect);
+      });
+
+      objectMap.clear();
+      (payload.objects ?? []).forEach((object) => {
+        objectMap.set(object.key ?? voxelKey(object.x, object.y, object.z), object);
+      });
+
+      eatenFishTimers.clear();
+      (payload.eatenFishTimers ?? []).forEach(({ key, remainingSeconds }) => {
+        eatenFishTimers.set(key, remainingSeconds);
+      });
+
+      if (payload.sceneCounts) {
+        const nextSceneCounts = {
+          ...DEFAULT_SCENE_COUNTS,
+          ...payload.sceneCounts,
+        };
+        sceneCountsRef.current = nextSceneCounts;
+        setSceneCounts(nextSceneCounts);
+      }
+
+      rebuildVoxelMesh();
+      rebuildWaterMesh();
+      rebuildFluidEffectGroup();
+      rebuildObjectGroup();
+    };
+
     generateSceneRef.current = generateScene;
+    saveSceneRef.current = (name) => saveScene({
+      name,
+      payload: createSceneSnapshot(),
+    });
+    loadSceneRef.current = applySceneSnapshot;
     clearSceneRef.current = () => {
       waterMap.clear();
       eatenFishTimers.clear();
@@ -927,6 +1027,8 @@ function App() {
       disposeObjectGroup(objectGroup);
       generateSceneRef.current = null;
       clearSceneRef.current = null;
+      saveSceneRef.current = null;
+      loadSceneRef.current = null;
     };
   }, []);
 
@@ -944,6 +1046,82 @@ function App() {
 
   const handleClearScene = () => {
     clearSceneRef.current?.();
+  };
+
+  const handleSaveScene = async () => {
+    if (!isSupabaseConfigured()) {
+      setSaveStatus('Add Supabase env vars to save scenes.');
+      return;
+    }
+
+    const name = window.prompt('Scene name', `Voxel scene ${new Date().toLocaleString()}`);
+
+    if (!name) {
+      return;
+    }
+
+    setSaveStatus('Saving...');
+
+    try {
+      await saveSceneRef.current?.(name);
+      setSaveStatus('Saved');
+    } catch (error) {
+      setSaveStatus(error.message || 'Save failed');
+    }
+  };
+
+  const handleLoadScene = async () => {
+    if (!isSupabaseConfigured()) {
+      setSaveStatus('Add Supabase env vars to load scenes.');
+      return;
+    }
+
+    setSaveStatus('Loading...');
+
+    try {
+      const scenes = await listScenes();
+      const selectedScene = chooseSavedScene(scenes, 'Load');
+
+      if (!selectedScene) {
+        setSaveStatus('');
+        return;
+      }
+
+      const savedScene = await loadScene(selectedScene.id);
+      loadSceneRef.current?.(savedScene.payload);
+      setSaveStatus(`Loaded ${savedScene.name}`);
+    } catch (error) {
+      setSaveStatus(error.message || 'Load failed');
+    }
+  };
+
+  const handleDeleteScene = async () => {
+    if (!isSupabaseConfigured()) {
+      setSaveStatus('Add Supabase env vars to delete scenes.');
+      return;
+    }
+
+    setSaveStatus('Loading saved scenes...');
+
+    try {
+      const scenes = await listScenes();
+      const selectedScene = chooseSavedScene(scenes, 'Delete');
+
+      if (!selectedScene) {
+        setSaveStatus('');
+        return;
+      }
+
+      if (!window.confirm(`Delete "${selectedScene.name}"?`)) {
+        setSaveStatus('');
+        return;
+      }
+
+      await deleteScene(selectedScene.id);
+      setSaveStatus(`Deleted ${selectedScene.name}`);
+    } catch (error) {
+      setSaveStatus(error.message || 'Delete failed');
+    }
   };
 
   return (
@@ -1032,6 +1210,10 @@ function App() {
             </label>
             <button className="generate-button" type="submit">Generate</button>
             <button className="clear-button" type="button" onClick={handleClearScene}>Clear</button>
+            <button className="save-button" type="button" onClick={handleSaveScene}>Save</button>
+            <button className="load-button" type="button" onClick={handleLoadScene}>Load</button>
+            <button className="delete-button" type="button" onClick={handleDeleteScene}>Delete</button>
+            {saveStatus && <span className="save-status">{saveStatus}</span>}
           </div>
         </section>
       </form>

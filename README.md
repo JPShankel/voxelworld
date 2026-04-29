@@ -6,6 +6,24 @@ This project was bootstrapped with [Create React App](https://github.com/faceboo
 
 In the project directory, you can run:
 
+## Supabase scene saves
+
+Create a `.env.local` file from `.env.example` and fill in your Supabase project URL and anon key.
+
+Create a table for saved scenes:
+
+```sql
+create table public.scenes (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+```
+
+If row-level security is enabled, add policies that match how you want scene saves to work. For a public prototype, allow anonymous inserts on `public.scenes`.
+The in-app Load button also needs anonymous select access, and Delete needs anonymous delete access.
+
 ### `npm start`
 
 Runs the app in the development mode.\

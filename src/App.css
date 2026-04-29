@@ -93,7 +93,10 @@
 }
 
 .generate-button,
-.clear-button {
+.clear-button,
+.save-button,
+.load-button,
+.delete-button {
   min-width: 96px;
   height: 36px;
   border: 1px solid #111111;
@@ -114,8 +117,39 @@
   color: #1f2328;
 }
 
-.clear-button:hover {
+.save-button {
+  min-width: 76px;
+  background: #ffffff;
+  color: #1f2328;
+}
+
+.load-button {
+  min-width: 76px;
+  background: #ffffff;
+  color: #1f2328;
+}
+
+.delete-button {
+  min-width: 76px;
+  border-color: #8a1f11;
+  background: #ffffff;
+  color: #8a1f11;
+}
+
+.clear-button:hover,
+.save-button:hover,
+.load-button:hover {
   background: #f4f6f8;
+}
+
+.delete-button:hover {
+  background: #fff1ee;
+}
+
+.save-status {
+  align-self: center;
+  color: #343a40;
+  font: 600 12px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .swatch {
@@ -134,7 +168,7 @@
 
   .scene-controls {
     display: grid;
-    grid-template-columns: repeat(3, minmax(68px, 1fr)) repeat(2, minmax(76px, auto));
+    grid-template-columns: repeat(3, minmax(68px, 1fr)) repeat(5, minmax(76px, auto));
   }
 }
 
@@ -156,7 +190,11 @@
   }
 
   .generate-button,
-  .clear-button {
+  .clear-button,
+  .save-button,
+  .load-button,
+  .delete-button,
+  .save-status {
     grid-column: 1 / -1;
   }
 }
