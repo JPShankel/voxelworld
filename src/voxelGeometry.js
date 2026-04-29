@@ -3,7 +3,10 @@ import * as THREE from 'three';
 export const VOXEL_SIZE = 10;
 
 export const VOXEL_PALETTE = {
+  snow: 0xf4f7fb,
+  rock: 0x9a9f9f,
   grass: 0x66a84f,
+  sand: 0xd8c07a,
   dirt: 0x8a5a35,
   stone: 0x8b9294,
 };
@@ -66,6 +69,22 @@ const FACE_DEFINITIONS = [
 ];
 
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
+
+function getSurfaceTerrainType(normalizedHeight) {
+  if (normalizedHeight < 0.22) {
+    return 'sand';
+  }
+
+  if (normalizedHeight < 0.66) {
+    return 'grass';
+  }
+
+  if (normalizedHeight < 0.84) {
+    return 'dirt';
+  }
+
+  return 'snow';
+}
 
 const createRandom = (seed) => {
   if (seed === undefined || seed === null) {
@@ -190,7 +209,7 @@ export function createVoxelTerrain(radius = 16, options = {}) {
         let type = 'stone';
 
         if (y === height - 1) {
-          type = 'grass';
+          type = getSurfaceTerrainType(normalizedHeight);
         } else if (y >= height - 3) {
           type = 'dirt';
         }

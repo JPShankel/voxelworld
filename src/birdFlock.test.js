@@ -48,3 +48,52 @@ test('birds eat fish when they dive close to a fish target', () => {
   expect(eatenFish).toEqual([fishTarget]);
   expect(birds[0].diveTarget).toBeNull();
 });
+
+test('birds choose fruit trees as perch targets', () => {
+  jest.spyOn(Math, 'random').mockReturnValue(0);
+  const birds = [];
+  const birdGroup = new THREE.Group();
+  const nest = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'birdNest' };
+  const fruitTree = { key: '2,1,0', x: 2, y: 1, z: 0, type: 'tree', fruitCount: 6 };
+
+  syncBirdFlock(birds, birdGroup, [nest]);
+  birds[0].fruitCooldown = 0;
+
+  updateBirdFlock(birds, [nest], () => 0, 1 / 60, {
+    getFruitTargets: () => [fruitTree],
+  });
+
+  expect(birds[0].fruitTarget).toBe(fruitTree);
+
+  Math.random.mockRestore();
+});
+
+test('birds eat fruit and stay perched in the tree before leaving', () => {
+  const birds = [];
+  const birdGroup = new THREE.Group();
+  const nest = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'birdNest' };
+  const fruitTree = { key: '0,1,0', x: 0, y: 1, z: 0, type: 'tree', fruitCount: 6 };
+  const eatenFruit = [];
+
+  syncBirdFlock(birds, birdGroup, [nest]);
+  birds[0].fruitTarget = fruitTree;
+  birds[0].fruitHasEaten = false;
+  birds[0].position.set(5, 23, 5);
+
+  updateBirdFlock(birds, [nest], () => 0, 1 / 60, {
+    onFruitEaten: (tree) => eatenFruit.push(tree),
+  });
+
+  expect(eatenFruit).toEqual([fruitTree]);
+  expect(birds[0].perchTimer).toBeGreaterThan(0);
+  expect(birds[0].fruitTarget).toBe(fruitTree);
+  expect(birds[0].velocity.length()).toBe(0);
+  expect(birds[0].mesh.rotation.x).toBeCloseTo(-Math.PI * 0.5);
+
+  updateBirdFlock(birds, [nest], () => 0, 1 / 60, {
+    onFruitEaten: (tree) => eatenFruit.push(tree),
+  });
+
+  expect(eatenFruit).toHaveLength(1);
+  expect(birds[0].mesh.rotation.x).toBeCloseTo(-Math.PI * 0.5);
+});

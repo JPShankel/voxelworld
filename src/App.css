@@ -14,9 +14,9 @@
   top: 16px;
   left: 16px;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(260px, auto);
+  grid-template-columns: minmax(420px, 1fr) minmax(260px, auto);
   gap: 12px;
-  width: min(960px, calc(100vw - 32px));
+  width: min(840px, calc(100vw - 32px));
   padding: 10px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(0, 0, 0, 0.18);
@@ -48,10 +48,11 @@
   text-transform: uppercase;
 }
 
-.tool-grid {
-  display: flex;
-  flex-wrap: wrap;
+.tool-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
   gap: 8px;
+  align-items: end;
   min-width: 0;
 }
 
@@ -62,14 +63,16 @@
   align-items: end;
 }
 
-.scene-field {
+.scene-field,
+.tool-field {
   display: grid;
   gap: 5px;
   color: #343a40;
   font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.scene-field input {
+.scene-field input,
+.tool-field select {
   width: 100%;
   height: 34px;
   box-sizing: border-box;
@@ -79,6 +82,10 @@
   background: #ffffff;
   color: #1f2328;
   font: 600 14px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.tool-field select {
+  cursor: pointer;
 }
 
 .generate-button {
@@ -94,30 +101,6 @@
 
 .generate-button:hover {
   background: #343a40;
-}
-
-.tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 86px;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1f2328;
-  font: 600 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  cursor: pointer;
-}
-
-.tool:hover {
-  background: #f4f6f8;
-}
-
-.tool.active {
-  border-color: #111111;
-  box-shadow: inset 0 0 0 2px #111111;
 }
 
 .swatch {
@@ -148,13 +131,8 @@
     padding: 8px;
   }
 
-  .tool-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tool {
-    min-width: 0;
+  .tool-selectors {
+    grid-template-columns: 1fr;
   }
 
   .scene-controls {

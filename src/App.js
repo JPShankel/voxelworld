@@ -46,7 +46,10 @@ import {
 import './App.css';
 
 const VOXEL_TYPES = [
+  { id: 'snow', label: 'Snow' },
+  { id: 'rock', label: 'Rock' },
   { id: 'grass', label: 'Grass' },
+  { id: 'sand', label: 'Sand' },
   { id: 'dirt', label: 'Dirt' },
   { id: 'stone', label: 'Stone' },
 ];
@@ -54,6 +57,11 @@ const VOXEL_TYPES = [
 const EFFECT_TOOLS = [
   { id: 'water', label: 'Water', color: WATER_COLOR },
   ...FLUID_EFFECT_TYPES,
+];
+
+const PLACEABLE_TOOLS = [
+  ...OBJECT_TYPES.map((objectType) => ({ ...objectType, kind: 'object' })),
+  ...EFFECT_TOOLS.map((effectTool) => ({ ...effectTool, kind: 'effect' })),
 ];
 
 const DEFAULT_SCENE_COUNTS = {
@@ -67,13 +75,50 @@ const MAX_TREE_FRUIT = 6;
 const TREE_FRUIT_REGROW_SECONDS = 6;
 const voxelKey = (x, y, z) => `${x},${y},${z}`;
 const columnKey = (x, z) => `${x},${z}`;
-const toolKey = (kind, id) => `${kind}:${id}`;
 const getTimeOfDaySeed = (date = new Date()) => (
   date.getHours() * 60 * 60 * 1000
   + date.getMinutes() * 60 * 1000
   + date.getSeconds() * 1000
   + date.getMilliseconds()
 );
+
+function createGroundGrid(size, divisions, lineWidth = 0.12) {
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+  });
+  const xLineGeometry = new THREE.PlaneGeometry(size, lineWidth);
+  const zLineGeometry = new THREE.PlaneGeometry(lineWidth, size);
+  const step = size / divisions;
+  const halfSize = size / 2;
+
+  group.name = 'ground-grid';
+  xLineGeometry.rotateX(-Math.PI / 2);
+  zLineGeometry.rotateX(-Math.PI / 2);
+
+  for (let index = 0; index <= divisions; index += 1) {
+    const offset = -halfSize + index * step;
+    const xLine = new THREE.Mesh(xLineGeometry, material);
+    const zLine = new THREE.Mesh(zLineGeometry, material);
+
+    xLine.position.z = offset;
+    zLine.position.x = offset;
+    group.add(xLine, zLine);
+  }
+
+  group.userData.gridGeometries = [xLineGeometry, zLineGeometry];
+  group.userData.gridMaterial = material;
+
+  return group;
+}
+
+function disposeGroundGrid(grid) {
+  grid.userData.gridGeometries?.forEach((geometry) => geometry.dispose());
+  grid.userData.gridMaterial?.dispose();
+}
 
 function App() {
   const mountRef = useRef(null);
@@ -172,10 +217,8 @@ function App() {
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const grid = new THREE.GridHelper(gridSize, gridDivisions, 0x000000, 0x000000);
+    const grid = createGroundGrid(gridSize, gridDivisions, 0.18);
     grid.position.y = 0.02;
-    grid.material.opacity = 0.35;
-    grid.material.transparent = true;
     scene.add(grid);
 
     const voxelMap = new Map();
@@ -368,6 +411,16 @@ function App() {
         z: fish.cell.z,
       }));
 
+    const getFruitTargets = () => getTrees()
+      .filter((tree) => getTreeFruitCount(tree) > 0)
+      .map((tree) => ({
+        key: tree.key,
+        x: tree.x,
+        y: tree.y,
+        z: tree.z,
+        fruitCount: getTreeFruitCount(tree),
+      }));
+
     const getAvailableSurfaceCells = () => [...voxelMap.values()]
       .filter((voxel) => voxel.type === 'grass' && !voxelMap.has(voxelKey(voxel.x, voxel.y + 1, voxel.z)))
       .map((voxel) => ({ x: voxel.x, y: voxel.y + 1, z: voxel.z }));
@@ -453,6 +506,29 @@ function App() {
       pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
     };
 
+    const getGroundFace = () => {
+      const [groundHit] = raycaster.intersectObject(ground, false);
+
+      if (!groundHit) {
+        return null;
+      }
+
+      const x = Math.floor(groundHit.point.x / VOXEL_SIZE);
+      const z = Math.floor(groundHit.point.z / VOXEL_SIZE);
+
+      if (voxelMap.has(voxelKey(x, 0, z))) {
+        return null;
+      }
+
+      return {
+        x,
+        y: -1,
+        z,
+        normal: [0, 1, 0],
+        ground: true,
+      };
+    };
+
     const handlePointerMove = (event) => {
       pointerActive = true;
       updatePointer(event);
@@ -527,6 +603,12 @@ function App() {
         }
 
         rebuildVoxelMesh();
+        hoveredFace = null;
+        faceHighlight.visible = false;
+        return;
+      }
+
+      if (hoveredFace.ground && selectedTool.kind !== 'voxel') {
         hoveredFace = null;
         faceHighlight.visible = false;
         return;
@@ -665,8 +747,24 @@ function App() {
           faceHighlight.visible = true;
         }
       } else {
-        hoveredFace = null;
-        faceHighlight.visible = false;
+        const groundFace = pointerActive ? getGroundFace() : null;
+
+        if (groundFace && selectedToolRef.current.kind === 'voxel') {
+          const normal = new THREE.Vector3(...groundFace.normal);
+          const center = new THREE.Vector3(
+            (groundFace.x + 0.5) * VOXEL_SIZE,
+            (groundFace.y + 0.5) * VOXEL_SIZE,
+            (groundFace.z + 0.5) * VOXEL_SIZE
+          );
+
+          hoveredFace = groundFace;
+          faceHighlight.position.copy(center).addScaledVector(normal, VOXEL_SIZE * 0.501);
+          faceHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+          faceHighlight.visible = true;
+        } else {
+          hoveredFace = null;
+          faceHighlight.visible = false;
+        }
       }
 
       updateFishShoal(fishShoal, [...waterMap.values()], deltaSeconds);
@@ -690,6 +788,8 @@ function App() {
         eatenFishTimers.set(key, nextRemainingSeconds);
       });
 
+      let treeFruitChanged = false;
+
       updateBirdFlock(
         birds,
         getBirdNests(),
@@ -703,14 +803,21 @@ function App() {
               fishChanged = true;
             }
           },
+          getFruitTargets,
+          onFruitEaten: (tree) => {
+            const currentTree = objectMap.get(tree.key);
+            const currentFruitCount = getTreeFruitCount(currentTree);
+
+            if (currentFruitCount > 0) {
+              treeFruitChanged = setTreeFruitCount(tree, currentFruitCount - 1) || treeFruitChanged;
+            }
+          },
         }
       );
 
       if (fishChanged) {
         rebuildFishGroup();
       }
-
-      let treeFruitChanged = false;
 
       objectMap.forEach((object) => {
         if (object.type !== 'tree') {
@@ -800,6 +907,7 @@ function App() {
       renderer.dispose();
       groundGeometry.dispose();
       groundMaterial.dispose();
+      disposeGroundGrid(grid);
       faceHighlightGeometry.dispose();
       faceHighlightMaterial.dispose();
       disposeVoxelMesh(voxelMesh);
@@ -835,55 +943,43 @@ function App() {
       >
         <section className="control-section" aria-labelledby="tool-heading">
           <h2 id="tool-heading">Build</h2>
-          <div className="tool-grid" aria-label="Tool palette">
-            {VOXEL_TYPES.map((voxelType) => (
-              <button
-                key={voxelType.id}
-                className={toolKey('voxel', voxelType.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
-                type="button"
-                onClick={() => setSelectedTool({ kind: 'voxel', id: voxelType.id })}
-                aria-pressed={toolKey('voxel', voxelType.id) === toolKey(selectedTool.kind, selectedTool.id)}
-                title={voxelType.label}
+          <div className="tool-selectors" aria-label="Tool palette">
+            <label className="tool-field">
+              <span>Terrain</span>
+              <select
+                value={selectedTool.kind === 'voxel' ? selectedTool.id : VOXEL_TYPES[0].id}
+                onChange={(event) => {
+                  setSelectedTool({ kind: 'voxel', id: event.target.value });
+                }}
               >
-                <span
-                  className="swatch"
-                  style={{ backgroundColor: `#${VOXEL_PALETTE[voxelType.id].toString(16).padStart(6, '0')}` }}
-                />
-                <span>{voxelType.label}</span>
-              </button>
-            ))}
-            {OBJECT_TYPES.map((objectType) => (
-              <button
-                key={objectType.id}
-                className={toolKey('object', objectType.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
-                type="button"
-                onClick={() => setSelectedTool({ kind: 'object', id: objectType.id })}
-                aria-pressed={toolKey('object', objectType.id) === toolKey(selectedTool.kind, selectedTool.id)}
-                title={objectType.label}
+                {VOXEL_TYPES.map((voxelType) => (
+                  <option key={voxelType.id} value={voxelType.id}>
+                    {voxelType.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="tool-field">
+              <span>Place</span>
+              <select
+                value={selectedTool.kind === 'object' || selectedTool.kind === 'effect'
+                  ? `${selectedTool.kind}:${selectedTool.id}`
+                  : `${PLACEABLE_TOOLS[0].kind}:${PLACEABLE_TOOLS[0].id}`}
+                onChange={(event) => {
+                  const [kind, id] = event.target.value.split(':');
+                  setSelectedTool({ kind, id });
+                }}
               >
-                <span
-                  className="swatch"
-                  style={{ backgroundColor: `#${objectType.color.toString(16).padStart(6, '0')}` }}
-                />
-                <span>{objectType.label}</span>
-              </button>
-            ))}
-            {EFFECT_TOOLS.map((effectTool) => (
-              <button
-                key={effectTool.id}
-                className={toolKey('effect', effectTool.id) === toolKey(selectedTool.kind, selectedTool.id) ? 'tool active' : 'tool'}
-                type="button"
-                onClick={() => setSelectedTool({ kind: 'effect', id: effectTool.id })}
-                aria-pressed={toolKey('effect', effectTool.id) === toolKey(selectedTool.kind, selectedTool.id)}
-                title={effectTool.label}
-              >
-                <span
-                  className="swatch"
-                  style={{ backgroundColor: `#${effectTool.color.toString(16).padStart(6, '0')}` }}
-                />
-                <span>{effectTool.label}</span>
-              </button>
-            ))}
+                {PLACEABLE_TOOLS.map((placeableTool) => (
+                  <option
+                    key={`${placeableTool.kind}:${placeableTool.id}`}
+                    value={`${placeableTool.kind}:${placeableTool.id}`}
+                  >
+                    {placeableTool.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </section>
         <section className="control-section" aria-labelledby="scene-heading">

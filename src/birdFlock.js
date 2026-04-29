@@ -38,6 +38,19 @@ const nestPosition = (nest) => new THREE.Vector3(
   (nest.z + 0.5) * VOXEL_SIZE
 );
 
+const treePerchPosition = (tree) => new THREE.Vector3(
+  (tree.x + 0.5) * VOXEL_SIZE,
+  tree.y * VOXEL_SIZE + 13,
+  (tree.z + 0.5) * VOXEL_SIZE
+);
+
+function setPerchedPose(bird, index) {
+  const perchYaw = Math.sin(index * 1.7) * 0.45;
+  bird.mesh.position.copy(bird.position);
+  bird.mesh.rotation.set(-Math.PI * 0.5, perchYaw, 0);
+  bird.mesh.children[1].rotation.z = 0;
+}
+
 function createBirdMesh() {
   const group = new THREE.Group();
   const body = new THREE.Mesh(birdBodyGeometry, birdMaterial);
@@ -76,6 +89,10 @@ function createBird(nest, index) {
     diveCooldown: 2 + index * 1.1,
     diveTarget: null,
     diveHasEaten: false,
+    fruitCooldown: 1 + index * 0.7,
+    fruitTarget: null,
+    fruitHasEaten: false,
+    perchTimer: 0,
     mesh,
   };
 }
@@ -112,9 +129,33 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
   const deltaScale = Math.min(deltaSeconds * 60, 2);
   const getFishTargets = options.getFishTargets ?? (() => []);
   const onFishEaten = options.onFishEaten ?? (() => {});
+  const getFruitTargets = options.getFruitTargets ?? (() => []);
+  const onFruitEaten = options.onFruitEaten ?? (() => {});
 
   birds.forEach((bird, index) => {
     bird.diveCooldown = Math.max(0, (bird.diveCooldown ?? 0) - deltaSeconds);
+    bird.fruitCooldown = Math.max(0, (bird.fruitCooldown ?? 0) - deltaSeconds);
+
+    if (bird.perchTimer > 0) {
+      bird.perchTimer = Math.max(0, bird.perchTimer - deltaSeconds);
+
+      if (bird.fruitTarget) {
+        const perchPosition = treePerchPosition(bird.fruitTarget);
+        bird.position.lerp(perchPosition, Math.min(deltaSeconds * 4, 1));
+      }
+
+      bird.velocity.multiplyScalar(0.78);
+      setPerchedPose(bird, index);
+
+      if (bird.perchTimer <= 0) {
+        bird.fruitTarget = null;
+        bird.fruitHasEaten = false;
+        bird.fruitCooldown = 5 + Math.random() * 7;
+        bird.velocity.set(0.16 + Math.random() * 0.08, 0.12, 0.08 - Math.random() * 0.16);
+      }
+
+      return;
+    }
 
     if (!bird.diveTarget && bird.diveCooldown <= 0) {
       const fishTargets = getFishTargets(bird);
@@ -123,6 +164,16 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
         const targetIndex = Math.floor(Math.random() * fishTargets.length);
         bird.diveTarget = fishTargets[targetIndex];
         bird.diveHasEaten = false;
+      }
+    }
+
+    if (!bird.diveTarget && !bird.fruitTarget && bird.fruitCooldown <= 0) {
+      const fruitTargets = getFruitTargets(bird);
+
+      if (fruitTargets.length > 0 && Math.random() < 0.014) {
+        const targetIndex = Math.floor(Math.random() * fruitTargets.length);
+        bird.fruitTarget = fruitTargets[targetIndex];
+        bird.fruitHasEaten = false;
       }
     }
 
@@ -211,6 +262,29 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
           bird.diveTarget = null;
           bird.diveCooldown = 5 + Math.random() * 7;
         }
+      }
+    }
+
+    if (bird.fruitTarget) {
+      const targetPosition = treePerchPosition(bird.fruitTarget);
+      const perchForce = targetPosition.sub(bird.position);
+      const distanceToTarget = perchForce.length();
+
+      if (distanceToTarget > 0.001) {
+        bird.velocity.add(perchForce.setLength(0.07));
+      }
+
+      if (distanceToTarget < 6) {
+        if (!bird.fruitHasEaten) {
+          bird.fruitHasEaten = true;
+          onFruitEaten(bird.fruitTarget, bird);
+        }
+
+        bird.perchTimer = 4 + Math.random() * 5;
+        bird.velocity.set(0, 0, 0);
+        bird.position.copy(treePerchPosition(bird.fruitTarget));
+        setPerchedPose(bird, index);
+        return;
       }
     }
 

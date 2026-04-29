@@ -3,6 +3,7 @@ import {
   createVoxelMesh,
   createVoxelTerrain,
   disposeVoxelMesh,
+  VOXEL_PALETTE,
   VOXEL_SIZE,
 } from './voxelGeometry';
 
@@ -36,6 +37,49 @@ test('creates varied terrain heights from midpoint displacement', () => {
   });
 
   expect(new Set([...topHeights.values()]).size).toBeGreaterThan(2);
+});
+
+test('creates vertical surface strata by terrain elevation', () => {
+  const terrain = createVoxelTerrain(8, { seed: 21, minHeight: 1, maxHeight: 10 });
+  const topVoxels = new Map();
+
+  terrain.forEach((voxel) => {
+    const key = `${voxel.x},${voxel.z}`;
+    const current = topVoxels.get(key);
+
+    if (!current || voxel.y > current.y) {
+      topVoxels.set(key, voxel);
+    }
+  });
+
+  const surfaceTypes = new Set([...topVoxels.values()].map((voxel) => voxel.type));
+
+  expect(surfaceTypes.has('sand')).toBe(true);
+  expect(surfaceTypes.has('grass')).toBe(true);
+  expect(surfaceTypes.has('dirt')).toBe(true);
+  expect(surfaceTypes.has('snow')).toBe(true);
+  expect(VOXEL_PALETTE.sand).toBeDefined();
+  expect(VOXEL_PALETTE.rock).toBeDefined();
+  expect(VOXEL_PALETTE.snow).toBeDefined();
+});
+
+test('keeps dirt and stone below the terrain surface', () => {
+  const terrain = createVoxelTerrain(8, { seed: 11, minHeight: 4, maxHeight: 10 });
+  const topHeights = new Map();
+
+  terrain.forEach((voxel) => {
+    const key = `${voxel.x},${voxel.z}`;
+    topHeights.set(key, Math.max(topHeights.get(key) ?? 0, voxel.y));
+  });
+
+  const subsurfaceTypes = new Set(
+    terrain
+      .filter((voxel) => voxel.y < topHeights.get(`${voxel.x},${voxel.z}`))
+      .map((voxel) => voxel.type)
+  );
+
+  expect(subsurfaceTypes.has('dirt')).toBe(true);
+  expect(subsurfaceTypes.has('stone')).toBe(true);
 });
 
 test('builds exposed-face voxel geometry', () => {
