@@ -57,10 +57,14 @@
 }
 
 .scene-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(68px, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: end;
+}
+
+.scene-field {
+  flex: 1 1 68px;
 }
 
 .scene-field,
@@ -88,7 +92,8 @@
   cursor: pointer;
 }
 
-.generate-button {
+.generate-button,
+.clear-button {
   min-width: 96px;
   height: 36px;
   border: 1px solid #111111;
@@ -101,6 +106,16 @@
 
 .generate-button:hover {
   background: #343a40;
+}
+
+.clear-button {
+  min-width: 76px;
+  background: #ffffff;
+  color: #1f2328;
+}
+
+.clear-button:hover {
+  background: #f4f6f8;
 }
 
 .swatch {
@@ -118,7 +133,8 @@
   }
 
   .scene-controls {
-    grid-template-columns: repeat(3, minmax(68px, 1fr)) minmax(104px, auto);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(68px, 1fr)) repeat(2, minmax(76px, auto));
   }
 }
 
@@ -139,7 +155,8 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .generate-button {
+  .generate-button,
+  .clear-button {
     grid-column: 1 / -1;
   }
 }

@@ -124,6 +124,7 @@ function App() {
   const mountRef = useRef(null);
   const controlPanelRef = useRef(null);
   const generateSceneRef = useRef(null);
+  const clearSceneRef = useRef(null);
   const [selectedTool, setSelectedTool] = useState({ kind: 'voxel', id: 'grass' });
   const [sceneCounts, setSceneCounts] = useState(DEFAULT_SCENE_COUNTS);
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -472,6 +473,15 @@ function App() {
     };
 
     generateSceneRef.current = generateScene;
+    clearSceneRef.current = () => {
+      waterMap.clear();
+      eatenFishTimers.clear();
+      fluidEffectMap.clear();
+      objectMap.clear();
+      rebuildWaterMesh();
+      rebuildFluidEffectGroup();
+      rebuildObjectGroup();
+    };
     generateScene(DEFAULT_SCENE_COUNTS);
 
     const getSurfaceHeight = (worldX, worldZ) => {
@@ -916,6 +926,7 @@ function App() {
       disposeFluidEffectGroup(fluidEffectGroup);
       disposeObjectGroup(objectGroup);
       generateSceneRef.current = null;
+      clearSceneRef.current = null;
     };
   }, []);
 
@@ -929,6 +940,10 @@ function App() {
   const handleGenerateScene = (event) => {
     event.preventDefault();
     generateSceneRef.current?.(sceneCounts, { reseedTerrain: true });
+  };
+
+  const handleClearScene = () => {
+    clearSceneRef.current?.();
   };
 
   return (
@@ -1016,6 +1031,7 @@ function App() {
               />
             </label>
             <button className="generate-button" type="submit">Generate</button>
+            <button className="clear-button" type="button" onClick={handleClearScene}>Clear</button>
           </div>
         </section>
       </form>
