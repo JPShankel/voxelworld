@@ -3,6 +3,8 @@ import { VOXEL_SIZE } from './voxelGeometry';
 
 export const BIRDS_PER_NEST = 6;
 export const FISH_EATEN_COOLDOWN_SECONDS = 10;
+export const POST_FISH_TREE_SEEK_SECONDS = 9;
+export const TREE_PERCH_HEIGHT = 17.2;
 
 const birdMaterial = new THREE.MeshStandardMaterial({
   color: 0x2f80ed,
@@ -40,7 +42,7 @@ const nestPosition = (nest) => new THREE.Vector3(
 
 const treePerchPosition = (tree) => new THREE.Vector3(
   (tree.x + 0.5) * VOXEL_SIZE,
-  tree.y * VOXEL_SIZE + 13,
+  tree.y * VOXEL_SIZE + TREE_PERCH_HEIGHT,
   (tree.z + 0.5) * VOXEL_SIZE
 );
 
@@ -89,6 +91,8 @@ function createBird(nest, index) {
     diveCooldown: 2 + index * 1.1,
     diveTarget: null,
     diveHasEaten: false,
+    waterAvoidTarget: null,
+    treeSeekTimer: 0,
     fruitCooldown: 1 + index * 0.7,
     fruitTarget: null,
     fruitHasEaten: false,
@@ -130,11 +134,13 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
   const getFishTargets = options.getFishTargets ?? (() => []);
   const onFishEaten = options.onFishEaten ?? (() => {});
   const getFruitTargets = options.getFruitTargets ?? (() => []);
+  const getTreeTargets = options.getTreeTargets ?? getFruitTargets;
   const onFruitEaten = options.onFruitEaten ?? (() => {});
 
   birds.forEach((bird, index) => {
     bird.diveCooldown = Math.max(0, (bird.diveCooldown ?? 0) - deltaSeconds);
     bird.fruitCooldown = Math.max(0, (bird.fruitCooldown ?? 0) - deltaSeconds);
+    bird.treeSeekTimer = Math.max(0, (bird.treeSeekTimer ?? 0) - deltaSeconds);
 
     if (bird.perchTimer > 0) {
       bird.perchTimer = Math.max(0, bird.perchTimer - deltaSeconds);
@@ -157,7 +163,17 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
       return;
     }
 
-    if (!bird.diveTarget && bird.diveCooldown <= 0) {
+    if (bird.treeSeekTimer > 0 && !bird.fruitTarget) {
+      const treeTargets = getTreeTargets(bird);
+
+      if (treeTargets.length > 0) {
+        const targetIndex = Math.floor(Math.random() * treeTargets.length);
+        bird.fruitTarget = treeTargets[targetIndex];
+        bird.fruitHasEaten = false;
+      }
+    }
+
+    if (!bird.diveTarget && bird.treeSeekTimer <= 0 && bird.diveCooldown <= 0) {
       const fishTargets = getFishTargets(bird);
 
       if (fishTargets.length > 0 && Math.random() < 0.018) {
@@ -227,6 +243,20 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
       Math.cos(performance.now() * 0.0013 + index) * 0.006,
       Math.cos(performance.now() * 0.0008 + index) * 0.003
     );
+    const waterAvoidance = new THREE.Vector3();
+
+    if (bird.treeSeekTimer > 0 && bird.waterAvoidTarget) {
+      const waterPosition = new THREE.Vector3(
+        (bird.waterAvoidTarget.x + 0.5) * VOXEL_SIZE,
+        bird.waterAvoidTarget.y * VOXEL_SIZE + 4,
+        (bird.waterAvoidTarget.z + 0.5) * VOXEL_SIZE
+      );
+      const awayFromWater = bird.position.clone().sub(waterPosition);
+
+      if (awayFromWater.length() > 0.001 && awayFromWater.length() < 90) {
+        waterAvoidance.add(awayFromWater.setLength(0.055));
+      }
+    }
 
     bird.velocity
       .add(separation.multiplyScalar(1.2))
@@ -234,7 +264,8 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
       .add(cohesion)
       .add(homeForce)
       .add(lift)
-      .add(drift);
+      .add(drift)
+      .add(waterAvoidance);
 
     if (bird.diveTarget) {
       const targetPosition = new THREE.Vector3(
@@ -252,6 +283,17 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
       if (!bird.diveHasEaten && distanceToTarget < 7) {
         bird.diveHasEaten = true;
         onFishEaten(bird.diveTarget, bird);
+        bird.waterAvoidTarget = bird.diveTarget;
+        bird.treeSeekTimer = POST_FISH_TREE_SEEK_SECONDS + Math.random() * 4;
+        bird.fruitCooldown = 0;
+        bird.diveCooldown = bird.treeSeekTimer + 5 + Math.random() * 5;
+
+        const treeTargets = getTreeTargets(bird);
+        if (treeTargets.length > 0) {
+          const targetIndex = Math.floor(Math.random() * treeTargets.length);
+          bird.fruitTarget = treeTargets[targetIndex];
+          bird.fruitHasEaten = false;
+        }
       }
 
       if (bird.diveHasEaten || distanceToTarget < 4) {
@@ -260,7 +302,9 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
 
         if (bird.position.distanceTo(home) < 28 || bird.diveHasEaten) {
           bird.diveTarget = null;
-          bird.diveCooldown = 5 + Math.random() * 7;
+          if (bird.treeSeekTimer <= 0) {
+            bird.diveCooldown = 5 + Math.random() * 7;
+          }
         }
       }
     }
@@ -275,12 +319,14 @@ export function updateBirdFlock(birds, nests, getSurfaceHeight, deltaSeconds, op
       }
 
       if (distanceToTarget < 6) {
-        if (!bird.fruitHasEaten) {
+        if (!bird.fruitHasEaten && (bird.fruitTarget.fruitCount ?? 1) > 0) {
           bird.fruitHasEaten = true;
           onFruitEaten(bird.fruitTarget, bird);
         }
 
         bird.perchTimer = 4 + Math.random() * 5;
+        bird.treeSeekTimer = 0;
+        bird.waterAvoidTarget = null;
         bird.velocity.set(0, 0, 0);
         bird.position.copy(treePerchPosition(bird.fruitTarget));
         setPerchedPose(bird, index);

@@ -44,11 +44,16 @@ import {
   validateWater,
 } from './waterGeometry';
 import {
+  clearStoredSession,
   deleteScene,
+  getStoredSession,
   isSupabaseConfigured,
   listScenes,
   loadScene,
   saveScene,
+  signInWithPassword,
+  signOut,
+  signUpWithPassword,
 } from './supabaseScenes';
 import './App.css';
 
@@ -163,8 +168,11 @@ function App() {
   const [sceneCounts, setSceneCounts] = useState(DEFAULT_SCENE_COUNTS);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [saveStatus, setSaveStatus] = useState('');
+  const [authStatus, setAuthStatus] = useState('');
+  const [supabaseSession, setSupabaseSession] = useState(() => getStoredSession());
   const selectedToolRef = useRef(selectedTool);
   const sceneCountsRef = useRef(sceneCounts);
+  const supabaseSessionRef = useRef(supabaseSession);
 
   useEffect(() => {
     selectedToolRef.current = selectedTool;
@@ -173,6 +181,10 @@ function App() {
   useEffect(() => {
     sceneCountsRef.current = sceneCounts;
   }, [sceneCounts]);
+
+  useEffect(() => {
+    supabaseSessionRef.current = supabaseSession;
+  }, [supabaseSession]);
 
   useEffect(() => {
     const revealDistance = 96;
@@ -571,6 +583,7 @@ function App() {
     saveSceneRef.current = (name) => saveScene({
       name,
       payload: createSceneSnapshot(),
+      session: supabaseSessionRef.current,
     });
     loadSceneRef.current = applySceneSnapshot;
     clearSceneRef.current = () => {
@@ -914,6 +927,7 @@ function App() {
             }
           },
           getFruitTargets,
+          getTreeTargets: getTrees,
           onFruitEaten: (tree) => {
             const currentTree = objectMap.get(tree.key);
             const currentFruitCount = getTreeFruitCount(currentTree);
@@ -1054,6 +1068,11 @@ function App() {
       return;
     }
 
+    if (!supabaseSession) {
+      setSaveStatus('Sign in to save scenes.');
+      return;
+    }
+
     const name = window.prompt('Scene name', `Voxel scene ${new Date().toLocaleString()}`);
 
     if (!name) {
@@ -1076,10 +1095,15 @@ function App() {
       return;
     }
 
+    if (!supabaseSession) {
+      setSaveStatus('Sign in to load scenes.');
+      return;
+    }
+
     setSaveStatus('Loading...');
 
     try {
-      const scenes = await listScenes();
+      const scenes = await listScenes(20, supabaseSession);
       const selectedScene = chooseSavedScene(scenes, 'Load');
 
       if (!selectedScene) {
@@ -1087,7 +1111,7 @@ function App() {
         return;
       }
 
-      const savedScene = await loadScene(selectedScene.id);
+      const savedScene = await loadScene(selectedScene.id, supabaseSession);
       loadSceneRef.current?.(savedScene.payload);
       setSaveStatus(`Loaded ${savedScene.name}`);
     } catch (error) {
@@ -1101,10 +1125,15 @@ function App() {
       return;
     }
 
+    if (!supabaseSession) {
+      setSaveStatus('Sign in to delete scenes.');
+      return;
+    }
+
     setSaveStatus('Loading saved scenes...');
 
     try {
-      const scenes = await listScenes();
+      const scenes = await listScenes(20, supabaseSession);
       const selectedScene = chooseSavedScene(scenes, 'Delete');
 
       if (!selectedScene) {
@@ -1117,11 +1146,89 @@ function App() {
         return;
       }
 
-      await deleteScene(selectedScene.id);
+      await deleteScene(selectedScene.id, supabaseSession);
       setSaveStatus(`Deleted ${selectedScene.name}`);
     } catch (error) {
       setSaveStatus(error.message || 'Delete failed');
     }
+  };
+
+  const promptForCredentials = () => {
+    const email = window.prompt('Email');
+
+    if (!email) {
+      return null;
+    }
+
+    const password = window.prompt('Password');
+
+    if (!password) {
+      return null;
+    }
+
+    return { email, password };
+  };
+
+  const handleSignIn = async () => {
+    if (!isSupabaseConfigured()) {
+      setAuthStatus('Add Supabase env vars to sign in.');
+      return;
+    }
+
+    const credentials = promptForCredentials();
+
+    if (!credentials) {
+      return;
+    }
+
+    setAuthStatus('Signing in...');
+
+    try {
+      const session = await signInWithPassword(credentials);
+      setSupabaseSession(session);
+      setAuthStatus(`Signed in as ${session.user?.email ?? credentials.email}`);
+    } catch (error) {
+      setAuthStatus(error.message || 'Sign in failed');
+    }
+  };
+
+  const handleSignUp = async () => {
+    if (!isSupabaseConfigured()) {
+      setAuthStatus('Add Supabase env vars to sign up.');
+      return;
+    }
+
+    const credentials = promptForCredentials();
+
+    if (!credentials) {
+      return;
+    }
+
+    setAuthStatus('Creating account...');
+
+    try {
+      const session = await signUpWithPassword(credentials);
+      if (session.access_token) {
+        setSupabaseSession(session);
+        setAuthStatus(`Signed in as ${session.user?.email ?? credentials.email}`);
+      } else {
+        setSupabaseSession(null);
+        setAuthStatus('Check your email to confirm.');
+      }
+    } catch (error) {
+      setAuthStatus(error.message || 'Sign up failed');
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(supabaseSession);
+    } catch {
+      clearStoredSession();
+    }
+
+    setSupabaseSession(null);
+    setAuthStatus('Signed out');
   };
 
   return (
@@ -1210,13 +1317,37 @@ function App() {
             </label>
             <button className="generate-button" type="submit">Generate</button>
             <button className="clear-button" type="button" onClick={handleClearScene}>Clear</button>
+          </div>
+        </section>
+      </form>
+      <aside className="database-toolbar" aria-label="Database controls">
+        <section className="database-toolbar-section" aria-labelledby="database-heading">
+          <h2 id="database-heading">Database</h2>
+          <div className="database-actions">
             <button className="save-button" type="button" onClick={handleSaveScene}>Save</button>
             <button className="load-button" type="button" onClick={handleLoadScene}>Load</button>
             <button className="delete-button" type="button" onClick={handleDeleteScene}>Delete</button>
             {saveStatus && <span className="save-status">{saveStatus}</span>}
           </div>
         </section>
-      </form>
+        <section className="database-toolbar-section" aria-labelledby="account-heading">
+          <h2 id="account-heading">Account</h2>
+          <div className="auth-controls">
+            {supabaseSession ? (
+              <>
+                <span className="account-email">{supabaseSession.user?.email ?? 'Signed in'}</span>
+                <button className="auth-button" type="button" onClick={handleSignOut}>Sign Out</button>
+              </>
+            ) : (
+              <>
+                <button className="auth-button primary" type="button" onClick={handleSignIn}>Sign In</button>
+                <button className="auth-button" type="button" onClick={handleSignUp}>Sign Up</button>
+              </>
+            )}
+            {authStatus && <span className="auth-status">{authStatus}</span>}
+          </div>
+        </section>
+      </aside>
     </>
   );
 }

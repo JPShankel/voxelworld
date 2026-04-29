@@ -15,14 +15,37 @@ Create a table for saved scenes:
 ```sql
 create table public.scenes (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   payload jsonb not null,
   created_at timestamptz not null default now()
 );
+
+create index scenes_user_created_at_idx
+  on public.scenes (user_id, created_at desc);
+
+alter table public.scenes enable row level security;
+
+create policy "Users can insert their scenes"
+on public.scenes
+for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+create policy "Users can read their scenes"
+on public.scenes
+for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "Users can delete their scenes"
+on public.scenes
+for delete
+to authenticated
+using (auth.uid() = user_id);
 ```
 
-If row-level security is enabled, add policies that match how you want scene saves to work. For a public prototype, allow anonymous inserts on `public.scenes`.
-The in-app Load button also needs anonymous select access, and Delete needs anonymous delete access.
+Scene saving, loading, and deleting require a signed-in Supabase user. Enable email/password signups in Supabase Auth if you want to use the in-app Sign Up button.
 
 ### `npm start`
 
